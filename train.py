@@ -114,10 +114,17 @@ class HCSMini(HCSData):
 
 
 data = HCSMini('data/mini.csv')
-x, y = data[0]
+
+idx = st.slider('Select sample:', 0, len(data))
+
+x, y = data[idx]
 
 n = st.slider('Select modality:', 0, 4)
 plt.imshow(x[..., n])
 st.pyplot()
 
 "---"
+
+"""
+# Model
+"""
