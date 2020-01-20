@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms, utils
+
+import torchvision as tv
 
 """
 # MVP Training
@@ -27,7 +27,7 @@ in the mini dataset.
 "# Data Generator"
 
 
-class HCSData(Dataset):
+class HCSData(torch.utils.data.Dataset):
     """
     High Content Screening Dataset (BBBC022)
     """
@@ -69,13 +69,13 @@ class HCSData(Dataset):
         """
         plate = sample['PLATE']  # Get plate num.
 
-        channels = {
-            'FileHoechst': 'w1',
-            'FileER': 'w2',
-            'FileSyto': 'w3',
-            'FilePh': 'w4',
-            'FileMito': 'w5'
-        }
+        # channels = {
+        #     'FileHoechst': 'w1',
+        #     'FileER': 'w2',
+        #     'FileSyto': 'w3',
+        #     'FilePh': 'w4',
+        #     'FileMito': 'w5'
+        # }
 
         # Load each tiff file individually
         hoechst_path = self.root / \
@@ -127,4 +127,94 @@ st.pyplot()
 
 """
 # Model
+Find a basic pretrained model.
 """
+
+net = tv.models.vgg16(pretrained=True, progress=True)
+
+st.write(net)
+
+"""
+---
+# CIFAR test
+"""
+
+transform = tv.transforms.Compose(
+    [tv.transforms.ToTensor(),
+     tv.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+trainset = tv.datasets.CIFAR10(root='./data', train=True,
+                               download=True, transform=transform)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
+                                          shuffle=True, num_workers=2)
+
+testset = tv.datasets.CIFAR10(root='./data', train=False,
+                              download=True, transform=transform)
+testloader = torch.utils.data.DataLoader(testset, batch_size=4,
+                                         shuffle=False, num_workers=2)
+
+classes = ('plane', 'car', 'bird', 'cat',
+           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+
+
+# functions to show an image
+
+
+def imshow(img):
+    img = img / 2 + 0.5     # unnormalize
+    npimg = img.numpy()
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    plt.show()
+
+
+# get some random training images
+dataiter = iter(trainloader)
+images, labels = dataiter.next()
+
+# show images
+imshow(tv.utils.make_grid(images))
+# print labels
+st.pyplot()
+st.write(' '.join('%5s' % classes[labels[j]] for j in range(4)))
+
+
+criterion = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+
+for epoch in range(2):  # loop over the dataset multiple times
+
+    running_loss = 0.0
+    for i, data in enumerate(trainloader, 0):
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = data
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = net(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        # print statistics
+        running_loss += loss.item()
+        if i % 100 == 99:    # print every 2000 mini-batches
+            print('[%d, %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 2000))
+            running_loss = 0.0
+            break
+
+print('Finished Training')
+#
+# dataiter = iter(testloader)
+# images, labels = dataiter.next()
+#
+# # print images
+# imshow(tv.utils.make_grid(images))
+# st.pyplot()
+#
+# outputs = net(images)
+# _, predicted = torch.max(outputs, 1)
+# st.write('Predicted: ', ' '.join('%5s' % classes[predicted[j]]
+#                                  for j in range(4)))
