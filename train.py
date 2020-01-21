@@ -1,4 +1,3 @@
-import streamlit as st
 from tqdm import tqdm
 
 import numpy as np
@@ -8,25 +7,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 import torch
-
 import torchvision as tv
 
+import logging
 
-# """
-# # MVP Training
-# Train a network to discriminate between treatment and non-treatment images
-# in the mini dataset.
-#
-# # Todo:
-# - Data generator
-# - Train/test split
-# - Train using an encoder
-# - Validate
-#
-# ---
-# """
-#
-# "# Data Generator"
+logging.basicConfig(level=logging.DEBUG)
 
 
 class HCSData(torch.utils.data.Dataset):
@@ -34,13 +19,20 @@ class HCSData(torch.utils.data.Dataset):
     High Content Screening Dataset (BBBC022)
     """
 
-    def __init__(self, csv_file):
+    def __init__(self, data):
         """
         Args:
-            csv_file (string) : file path to metadata csv
+            data (DataFrame) : pandas dataframe of metadata
         """
-        self.df = pd.read_csv(csv_file, index_col=0)
+        self.df = data
         self.root = Path("./data/")
+
+    @classmethod
+    def from_csv(cls, csv_file):
+        """
+        Constructor to generate a dataset from a csv file
+        """
+        return cls(pd.read_csv(csv_file, index_col=0))
 
     def __len__(self):
         return len(self.df)
@@ -73,14 +65,6 @@ class HCSData(torch.utils.data.Dataset):
         """
         plate = sample['PLATE']  # Get plate num.
 
-        # channels = {
-        #     'FileHoechst': 'w1',
-        #     'FileER': 'w2',
-        #     'FileSyto': 'w3',
-        #     'FilePh': 'w4',
-        #     'FileMito': 'w5'
-        # }
-
         # Load each tiff file individually
         hoechst_path = self.root / \
             f"BBBC022_v1_images_{plate}w1/{sample['FileHoechst']}"
@@ -103,49 +87,93 @@ class HCSData(torch.utils.data.Dataset):
 
         return img.astype(np.int64())
 
+    def split(self, ratio):
+        """
+        Split the dataset into two subsets defined by the ration
+        ration (double) : dataset is split into sizes of [ration, 1-ratio]
+        """
+        try:
+            assert (ratio < 1) & (ratio > 0), \
+                "Train-test split should be greater than 0 and less than 1."
+
+            # Stratify by class
+            mock = self.df[self.df['ROLE'] == 'mock']
+            compound = self.df[self.df['ROLE'] == 'compound']
+
+            mock_idx = np.round(ratio * len(mock)).astype(np.int)
+            comp_idx = np.round(ratio * len(compound)).astype(np.int)
+
+            train = pd.concat([mock.iloc[:mock_idx], compound.iloc[:comp_idx]])
+            test = pd.concat([mock.iloc[mock_idx:], compound.iloc[comp_idx:]])
+
+            return self.__class__(train), self.__class__(test)
+
+        except AssertionError as error:
+            logging.exception(error)
+
 
 class HCSMini(HCSData):
     """
     A mini version of the BBBC022 dataset for rapid testing
     """
 
-    def __init__(self, csv_file):
+    def __init__(self, data):
         """
         Modifies the root data directory so that it points to the mini dataset
         """
-        super().__init__(csv_file)
+        super().__init__(data)
         self.root = Path('./data/mini')
 
 
+# Set up gpu/cpu device
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# Parameters
 n_epochs = 1
 batch_size = 4
-
-data = HCSMini('data/mini.csv')
-loader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True)
-
-# """
-# # Model
-# Find a basic pretrained model.
-# """
-
 label_classes = 2
 
+# Dataset
+data = HCSMini.from_csv('data/mini.csv')  # Load dataset
+train, test = data.split(0.8)  # Split data into train and test
+
+len(train)
+len(test)
+
+len(data)
+
+train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
+    data, batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(  # Generate a testing data loader
+    data, batch_size=batch_size, shuffle=True)
+
+# Define Model
 net = tv.models.vgg16(pretrained=True, progress=True)
 net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
 net.classifier[-1] = torch.nn.Linear(4096, label_classes, bias=True)
+# Move Model to GPU
+if torch.cuda.device_count() > 1:  # If multiple gpu's
+    net = torch.nn.DataParallel(net)  # Parallelize
+net.to(device)  # Move model to device
 
-print(net)
-
+# Define loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(net.parameters(), lr=0.001)
 
-for epoch in range(n_epochs):
-    for batch_n, (x, y) in tqdm(enumerate(loader)):
+# Training
+for epoch in range(n_epochs):  # Iter through epochcs
+    epoch_loss = 0
+    for batch_n, (X, Y) in tqdm(enumerate(train_loader)):  # Iter through batch
+        x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
 
-        optimizer.zero_grad()
+        optimizer.zero_grad()  # Reset gradients
 
-        o = net(x)
-        loss = criterion(o, y)
+        o = net(x)  # Forward pass
 
-        loss.backward()
-        optimizer.step()
+        loss = criterion(o, y)  # Compute Loss
+        loss.backward()  # Propagate loss, compute gradients
+        optimizer.step()  # Update weights
+
+        epoch_loss += loss  # cumulative Loss
+
+    logging.info(epoch_loss)

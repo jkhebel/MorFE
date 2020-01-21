@@ -5,7 +5,6 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 from pathlib import Path
-from matplotlib import pyplot as plt
 
 "# BBBC 022 Dataset"
 
