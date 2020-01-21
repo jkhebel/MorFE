@@ -1,4 +1,5 @@
 import streamlit as st
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -10,21 +11,22 @@ import torch
 
 import torchvision as tv
 
-"""
-# MVP Training
-Train a network to discriminate between treatment and non-treatment images
-in the mini dataset.
 
-# Todo:
-- Data generator
-- Train/test split
-- Train using an encoder
-- Validate
-
----
-"""
-
-"# Data Generator"
+# """
+# # MVP Training
+# Train a network to discriminate between treatment and non-treatment images
+# in the mini dataset.
+#
+# # Todo:
+# - Data generator
+# - Train/test split
+# - Train using an encoder
+# - Validate
+#
+# ---
+# """
+#
+# "# Data Generator"
 
 
 class HCSData(torch.utils.data.Dataset):
@@ -50,7 +52,8 @@ class HCSData(torch.utils.data.Dataset):
         """
         sample = self.df.iloc[idx]  # Grab sample at index idx
 
-        x = self.__load_img__(sample)  # Load images
+        x = torch.from_numpy(self.__load_img__(sample)).type(
+            torch.float)  # Load images
         y = sample['ROLE']  # Load label
 
         # Encode y labels to binary
@@ -58,7 +61,8 @@ class HCSData(torch.utils.data.Dataset):
             'mock': 0,
             'compound': 1
         }
-        y = label_enc.get(y, 0)  # Get enc from label, default = 'mock'
+        # Get enc from label, default = 'mock'
+        y = torch.tensor(label_enc.get(y, 0), dtype=torch.int64)
 
         return x, y
 
@@ -95,9 +99,9 @@ class HCSData(torch.utils.data.Dataset):
         mito = plt.imread(mito_path)
 
         # Stack images in channel (x, y, c) dimension
-        img = np.stack([hoechst, er, syto, ph, mito], axis=-1)
+        img = np.stack([hoechst, er, syto, ph, mito])
 
-        return img
+        return img.astype(np.int64())
 
 
 class HCSMini(HCSData):
@@ -113,108 +117,35 @@ class HCSMini(HCSData):
         self.root = Path('./data/mini')
 
 
+n_epochs = 1
+batch_size = 4
+
 data = HCSMini('data/mini.csv')
+loader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True)
 
-idx = st.slider('Select sample:', 0, len(data))
+# """
+# # Model
+# Find a basic pretrained model.
+# """
 
-x, y = data[idx]
-
-n = st.slider('Select modality:', 0, 4)
-plt.imshow(x[..., n])
-st.pyplot()
-
-"---"
-
-"""
-# Model
-Find a basic pretrained model.
-"""
+label_classes = 2
 
 net = tv.models.vgg16(pretrained=True, progress=True)
+net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
+net.classifier[-1] = torch.nn.Linear(4096, label_classes, bias=True)
 
-st.write(net)
-
-"""
----
-# CIFAR test
-"""
-
-transform = tv.transforms.Compose(
-    [tv.transforms.ToTensor(),
-     tv.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-trainset = tv.datasets.CIFAR10(root='./data', train=True,
-                               download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
-                                          shuffle=True, num_workers=2)
-
-testset = tv.datasets.CIFAR10(root='./data', train=False,
-                              download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=4,
-                                         shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-
-# functions to show an image
-
-
-def imshow(img):
-    img = img / 2 + 0.5     # unnormalize
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.show()
-
-
-# get some random training images
-dataiter = iter(trainloader)
-images, labels = dataiter.next()
-
-# show images
-imshow(tv.utils.make_grid(images))
-# print labels
-st.pyplot()
-st.write(' '.join('%5s' % classes[labels[j]] for j in range(4)))
-
+print(net)
 
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+optimizer = torch.optim.SGD(net.parameters(), lr=0.001)
 
-for epoch in range(2):  # loop over the dataset multiple times
+for epoch in range(n_epochs):
+    for batch_n, (x, y) in tqdm(enumerate(loader)):
 
-    running_loss = 0.0
-    for i, data in enumerate(trainloader, 0):
-        # get the inputs; data is a list of [inputs, labels]
-        inputs, labels = data
-
-        # zero the parameter gradients
         optimizer.zero_grad()
 
-        # forward + backward + optimize
-        outputs = net(inputs)
-        loss = criterion(outputs, labels)
+        o = net(x)
+        loss = criterion(o, y)
+
         loss.backward()
         optimizer.step()
-
-        # print statistics
-        running_loss += loss.item()
-        if i % 100 == 99:    # print every 2000 mini-batches
-            print('[%d, %5d] loss: %.3f' %
-                  (epoch + 1, i + 1, running_loss / 2000))
-            running_loss = 0.0
-            break
-
-print('Finished Training')
-#
-# dataiter = iter(testloader)
-# images, labels = dataiter.next()
-#
-# # print images
-# imshow(tv.utils.make_grid(images))
-# st.pyplot()
-#
-# outputs = net(images)
-# _, predicted = torch.max(outputs, 1)
-# st.write('Predicted: ', ' '.join('%5s' % classes[predicted[j]]
-#                                  for j in range(4)))
