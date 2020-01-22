@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-import cli_args
+import click
+import yaml
+
+# import cli_args
 
 import logging
 import torchvision as tv
@@ -9,11 +12,10 @@ import torch
 from pathlib import Path
 
 import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 class HCSData(torch.utils.data.Dataset):
@@ -132,61 +134,87 @@ class HCSMini(HCSData):
         self.root = Path('./data/mini')
 
 
-# Set up gpu/cpu device
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+@click.command()
+@click.argument(
+    "config_file", type=click.Path(exists=True),
+    default="./configs/params.yml"
+)
+def train(config_file='./data/mini.csv'):
+    # Set up gpu/cpu device
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # args = cli_args.parse()
+    config_file = './configs/params.yml'
+    # Parameters
+    with open(config_file, 'r') as f:
+        p = yaml.load(f, Loader=yaml.FullLoader)
+
+    # Dataset
+    data = HCSMini.from_csv('data/mini.csv')  # Load dataset
+    train, test = data.split(0.8)  # Split data into train and test
+
+    train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
+        train, batch_size=p['batch_size'], shuffle=False)
+    test_loader = torch.utils.data.DataLoader(  # Generate a testing data loader
+        test, batch_size=p['batch_size'], shuffle=False)
+
+    # Define Model
+    net = tv.models.vgg16(pretrained=True, progress=True)
+    net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
+    net.classifier[-1] = torch.nn.Linear(4096, p['label_classes'], bias=True)
+    # Move Model to GPU
+    if torch.cuda.device_count() > 1:  # If multiple gpu's
+        net = torch.nn.DataParallel(net)  # Parallelize
+    net.to(device)  # Move model to device
+
+    # Define loss and optimizer
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(net.parameters())
+
+    # Training
+    for epoch in range(p['n_epochs']):  # Iter through epochcs
+        cum_loss = 0
+        msg = f"Training epoch {epoch+1}: "
+        ttl = len(train_loader)  # Iter through batches
+        for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, ttl):
+            x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
+
+            o = net(x)  # Forward pass
+            optimizer.zero_grad()  # Reset gradients
+            loss = criterion(o, y)  # Compute Loss
+            loss.backward()  # Propagate loss, compute gradients
+            optimizer.step()  # Update weights
+
+            cum_loss += loss
+
+            # tqdm.write((
+            #     f"Batch {batch_n+1}:"
+            #     f"\tLoss: {loss.item():.4f}"
+            #     f"\tPrediction: {o.argmax()}"
+            #     f" \t Label: {y.item()}"
+            # ))
+
+        logging.info(cum_loss)
+
+        with torch.no_grad():
+
+            correct = 0
+            total = 0
+
+            msg = f"Testing epoch {epoch+1}: "
+            ttl = len(test_loader)  # Iter through batches
+            for batch_n, (X, Y) in tqdm(enumerate(test_loader), msg, ttl):
+                x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
+                o = net(x)  # Forward pass
+
+                # PERFORM SOME VALIDATION METRIC
+                _, predicted = torch.max(o.data, 1)
+                total += y.size(0)
+                correct += (predicted == y).sum().item()
+
+            print('Accuracy of the network on the test images: %d %%' % (
+                100 * correct / total))
 
 
-# args = cli_args.parse()
-
-# Parameters
-n_epochs = 20
-batch_size = 1
-label_classes = 2
-
-# Dataset
-data = HCSMini.from_csv('data/mini.csv')  # Load dataset
-train, test = data.split(0.8)  # Split data into train and test
-
-
-train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
-    data, batch_size=batch_size, shuffle=True)
-test_loader = torch.utils.data.DataLoader(  # Generate a testing data loader
-    data, batch_size=batch_size, shuffle=True)
-
-# Define Model
-net = tv.models.vgg16(pretrained=True, progress=True)
-net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
-net.classifier[-1] = torch.nn.Linear(4096, label_classes, bias=True)
-# Move Model to GPU
-if torch.cuda.device_count() > 1:  # If multiple gpu's
-    net = torch.nn.DataParallel(net)  # Parallelize
-net.to(device)  # Move model to device
-
-# Define loss and optimizer
-criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(net.parameters())
-
-# Training
-for epoch in range(n_epochs):  # Iter through epochcs
-    cum_loss = 0
-    msg = f"Training epoch {epoch+1}: "
-    ttl = len(train_loader)  # Iter through batches
-    for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, ttl):
-        x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
-
-        o = net(x)  # Forward pass
-        optimizer.zero_grad()  # Reset gradients
-        loss = criterion(o, y)  # Compute Loss
-        loss.backward()  # Propagate loss, compute gradients
-        optimizer.step()  # Update weights
-
-        cum_loss += loss
-
-        # tqdm.write((
-        #     f"Batch {batch_n+1}:"
-        #     f"\tLoss: {loss.item():.4f}"
-        #     f"\tPrediction: {o.argmax()}"
-        #     f" \t Label: {y.item()}"
-        # ))
-
-    logging.info(cum_loss)
+if __name__ == '__main__':
+    train()
