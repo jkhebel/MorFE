@@ -1,15 +1,17 @@
-from tqdm import tqdm
-
-import numpy as np
 import pandas as pd
-
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-import torch
-import torchvision as tv
+import numpy as np
+from tqdm import tqdm
+import cli_args
 
 import logging
+import torchvision as tv
+import torch
+from pathlib import Path
+
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -54,9 +56,14 @@ class HCSData(torch.utils.data.Dataset):
             'compound': 1
         }
         # Get enc from label, default = 'mock'
-        y = torch.tensor(label_enc.get(y, 0), dtype=torch.int64)
+        y = label_enc.get(y, 0)
 
         return x, y
+
+    def __one_hot_enc(self, label, n_labels):
+        a = torch.zeros(n_labels, dtype=torch.int64)
+        a[label] = 1
+        return a.type(torch.float)
 
     def __load_img__(self, sample):
         """
@@ -85,7 +92,7 @@ class HCSData(torch.utils.data.Dataset):
         # Stack images in channel (x, y, c) dimension
         img = np.stack([hoechst, er, syto, ph, mito])
 
-        return img.astype(np.int64())
+        return img.astype(np.float64())
 
     def split(self, ratio):
         """
@@ -128,19 +135,18 @@ class HCSMini(HCSData):
 # Set up gpu/cpu device
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+
+# args = cli_args.parse()
+
 # Parameters
-n_epochs = 1
-batch_size = 4
+n_epochs = 20
+batch_size = 1
 label_classes = 2
 
 # Dataset
 data = HCSMini.from_csv('data/mini.csv')  # Load dataset
 train, test = data.split(0.8)  # Split data into train and test
 
-len(train)
-len(test)
-
-len(data)
 
 train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
     data, batch_size=batch_size, shuffle=True)
@@ -158,22 +164,29 @@ net.to(device)  # Move model to device
 
 # Define loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(net.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(net.parameters())
 
 # Training
 for epoch in range(n_epochs):  # Iter through epochcs
-    epoch_loss = 0
-    for batch_n, (X, Y) in tqdm(enumerate(train_loader)):  # Iter through batch
+    cum_loss = 0
+    msg = f"Training epoch {epoch+1}: "
+    ttl = len(train_loader)  # Iter through batches
+    for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, ttl):
         x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
 
-        optimizer.zero_grad()  # Reset gradients
-
         o = net(x)  # Forward pass
-
+        optimizer.zero_grad()  # Reset gradients
         loss = criterion(o, y)  # Compute Loss
         loss.backward()  # Propagate loss, compute gradients
         optimizer.step()  # Update weights
 
-        epoch_loss += loss  # cumulative Loss
+        cum_loss += loss
 
-    logging.info(epoch_loss)
+        # tqdm.write((
+        #     f"Batch {batch_n+1}:"
+        #     f"\tLoss: {loss.item():.4f}"
+        #     f"\tPrediction: {o.argmax()}"
+        #     f" \t Label: {y.item()}"
+        # ))
+
+    logging.info(cum_loss)
