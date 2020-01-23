@@ -1,0 +1,6 @@
+# Model parameters -------------------------
+
+n_epochs: 300
+batch_size: 6
+label_classes: 2
+csv_file: "./data/mini.csv"
