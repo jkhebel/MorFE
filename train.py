@@ -12,6 +12,7 @@ import torch
 from pathlib import Path
 
 import matplotlib
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 
 
@@ -121,34 +122,35 @@ class HCSData(torch.utils.data.Dataset):
             logging.exception(error)
 
 
+# Parameters
+with open("./configs/params.yml", 'r') as f:
+    p = yaml.load(f)
+
+
 @click.command()
-@click.argument(
-    "config_file", type=click.Path(exists=True),
-    default="./configs/params.yml"
-)
-def train(config_file='./data/mini.csv'):
+@click.option("--csv_file", type=click.Path(exists=True), default=p['csv_file'])
+@click.option("--debug/--no-debug", default=p['debug'])
+@click.option("-e", "--epochs", type=int, default=p['epochs'])
+@click.option("-b", "--batch_size", type=int, default=p['batch_size'])
+@click.option("-s", "--split", type=float, default=p['split'])
+def train(csv_file, debug, epochs, batch_size, split):
     # Set up gpu/cpu device
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # args = cli_args.parse()
-    config_file = './configs/params.yml'
-    # Parameters
-    with open(config_file, 'r') as f:
-        p = yaml.load(f)
-
     # Dataset
-    data = HCSMini.from_csv('data/mini.csv')  # Load dataset
+    data = HCSData.from_csv('data/mini.csv')  # Load dataset
     train, test = data.split(0.8)  # Split data into train and test
 
     train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
-        train, batch_size=p['batch_size'], shuffle=False)
+        train, batch_size=batch_size, shuffle=False)
     test_loader = torch.utils.data.DataLoader(  # Generate a testing data loader
-        test, batch_size=p['batch_size'], shuffle=False)
+        test, batch_size=batch_size, shuffle=False)
 
+    n_classes = 2
     # Define Model
     net = tv.models.vgg16(pretrained=False, progress=True)
     net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
-    net.classifier[-1] = torch.nn.Linear(4096, p['label_classes'], bias=True)
+    net.classifier[-1] = torch.nn.Linear(4096, n_classes, bias=True)
     # Move Model to GPU
     if torch.cuda.device_count() > 1:  # If multiple gpu's
         net = torch.nn.DataParallel(net)  # Parallelize
@@ -159,15 +161,14 @@ def train(config_file='./data/mini.csv'):
     optimizer = torch.optim.Adam(net.parameters())
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
 
-    for (x, y) in data:
-        print(y)
+    print("Training...")
 
     tr_correct = 0
     tr_total = 0
     correct = 0
     total = 0
     # Training
-    for epoch in range(p['n_epochs']):  # Iter through epochcs
+    for epoch in range(epochs):  # Iter through epochcs
         cum_loss = 0
         msg = f"Training epoch {epoch+1}: "
         ttl = len(train_loader)  # Iter through batches
@@ -178,7 +179,7 @@ def train(config_file='./data/mini.csv'):
             optimizer.zero_grad()  # Reset gradients
             loss = criterion(o, y)  # Compute Loss
             loss.backward()  # Propagate loss, compute gradients
-            scheduler.step()  # Update weights
+            optimizer.step()  # Update weights
 
             cum_loss += loss.item()
 
@@ -193,6 +194,8 @@ def train(config_file='./data/mini.csv'):
             _, predicted = torch.max(o.data, 1)
             tr_total += y.size(0)
             tr_correct += (predicted == y).sum().item()
+
+        scheduler.step()  # Update the learning rate
 
         print(f"Training loss: {cum_loss:.2f}")
 
