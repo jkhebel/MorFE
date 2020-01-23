@@ -29,7 +29,7 @@ class HCSData(torch.utils.data.Dataset):
             data (DataFrame) : pandas dataframe of metadata
         """
         self.df = data
-        self.root = Path("./data/")
+        self.root = Path("./data/raw/")
 
     @classmethod
     def from_csv(cls, csv_file):
@@ -121,19 +121,6 @@ class HCSData(torch.utils.data.Dataset):
             logging.exception(error)
 
 
-class HCSMini(HCSData):
-    """
-    A mini version of the BBBC022 dataset for rapid testing
-    """
-
-    def __init__(self, data):
-        """
-        Modifies the root data directory so that it points to the mini dataset
-        """
-        super().__init__(data)
-        self.root = Path('./data/mini')
-
-
 @click.command()
 @click.argument(
     "config_file", type=click.Path(exists=True),
@@ -147,7 +134,7 @@ def train(config_file='./data/mini.csv'):
     config_file = './configs/params.yml'
     # Parameters
     with open(config_file, 'r') as f:
-        p = yaml.load(f, Loader=yaml.FullLoader)
+        p = yaml.load(f)
 
     # Dataset
     data = HCSMini.from_csv('data/mini.csv')  # Load dataset
@@ -159,7 +146,7 @@ def train(config_file='./data/mini.csv'):
         test, batch_size=p['batch_size'], shuffle=False)
 
     # Define Model
-    net = tv.models.vgg16(pretrained=True, progress=True)
+    net = tv.models.vgg16(pretrained=False, progress=True)
     net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
     net.classifier[-1] = torch.nn.Linear(4096, p['label_classes'], bias=True)
     # Move Model to GPU
@@ -170,13 +157,21 @@ def train(config_file='./data/mini.csv'):
     # Define loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters())
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
 
+    for (x, y) in data:
+        print(y)
+
+    tr_correct = 0
+    tr_total = 0
+    correct = 0
+    total = 0
     # Training
     for epoch in range(p['n_epochs']):  # Iter through epochcs
         cum_loss = 0
         msg = f"Training epoch {epoch+1}: "
         ttl = len(train_loader)  # Iter through batches
-        for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, ttl):
+        for batch_n, (X, Y) in enumerate(train_loader):
             x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
 
             o = net(x)  # Forward pass
@@ -185,7 +180,7 @@ def train(config_file='./data/mini.csv'):
             loss.backward()  # Propagate loss, compute gradients
             optimizer.step()  # Update weights
 
-            cum_loss += loss
+            cum_loss += loss.item()
 
             # tqdm.write((
             #     f"Batch {batch_n+1}:"
@@ -194,16 +189,18 @@ def train(config_file='./data/mini.csv'):
             #     f" \t Label: {y.item()}"
             # ))
 
-        logging.info(cum_loss)
+            # PERFORM SOME VALIDATION METRIC
+            _, predicted = torch.max(o.data, 1)
+            tr_total += y.size(0)
+            tr_correct += (predicted == y).sum().item()
+
+        print(f"Training loss: {cum_loss:.2f}")
 
         with torch.no_grad():
 
-            correct = 0
-            total = 0
-
             msg = f"Testing epoch {epoch+1}: "
             ttl = len(test_loader)  # Iter through batches
-            for batch_n, (X, Y) in tqdm(enumerate(test_loader), msg, ttl):
+            for batch_n, (X, Y) in enumerate(test_loader):
                 x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
                 o = net(x)  # Forward pass
 
@@ -212,8 +209,16 @@ def train(config_file='./data/mini.csv'):
                 total += y.size(0)
                 correct += (predicted == y).sum().item()
 
-            print('Accuracy of the network on the test images: %d %%' % (
-                100 * correct / total))
+            print(f"Epoch {epoch}:")
+            if epoch % 10 == 0:
+                print('Accuracy of the network on the train images: %d %%' % (
+                    100 * tr_correct / tr_total))
+                print('Accuracy of the network on the test images: %d %%' % (
+                    100 * correct / total))
+                correct = 0
+                total = 0
+                tr_correct = 0
+                tr_total = 0
 
 
 if __name__ == '__main__':
