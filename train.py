@@ -178,7 +178,7 @@ def train(config_file='./data/mini.csv'):
             optimizer.zero_grad()  # Reset gradients
             loss = criterion(o, y)  # Compute Loss
             loss.backward()  # Propagate loss, compute gradients
-            optimizer.step()  # Update weights
+            scheduler.step()  # Update weights
 
             cum_loss += loss.item()
 
