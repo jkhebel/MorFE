@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 
 import logging
-import torchvision as tv
 import torch
 from pathlib import Path
 
@@ -19,20 +18,45 @@ class HCSData(torch.utils.data.Dataset):
     High Content Screening Dataset (BBBC022)
     """
 
-    def __init__(self, data):
+    def __init__(self, data, data_path="./data/raw/"):
         """
         Args:
             data (DataFrame) : pandas dataframe of metadata
         """
         self.df = data
-        self.root = Path("./data/raw/")
+        self.df.columns = [
+            'FileER',
+            'FileHoechst',
+            'FileMito',
+            'FilePh',
+            'FileSyto',
+            'ROLE',
+            'ID',
+            'MMOL',
+            'PLATE_MAP_NAME',
+            'SMILES',
+            'WELL',
+            'PLATE',
+            'COMPOUND',
+            'SOURCE',
+            'SITE',
+            'TIME'
+        ]
+        self.root = Path(data_path)
 
     @classmethod
-    def from_csv(cls, csv_file):
+    def from_csv(cls, csv_file, data_path):
         """
         Constructor to generate a dataset from a csv file
         """
-        return cls(pd.read_csv(csv_file, index_col=0))
+        return cls(pd.read_csv(csv_file, index_col=0), data_path)
+
+    @property
+    def class_weights(self):
+        a = len(self.df[self.df['ROLE'] == 'mock'])
+        b = len(self.df[self.df['ROLE'] == 'compound'])
+        total = a + b
+        return torch.Tensor([1 - (a / total), 1 - (b / total)])
 
     def __len__(self):
         return len(self.df)
@@ -111,7 +135,7 @@ class HCSData(torch.utils.data.Dataset):
             train = pd.concat([mock.iloc[:mock_idx], compound.iloc[:comp_idx]])
             test = pd.concat([mock.iloc[mock_idx:], compound.iloc[comp_idx:]])
 
-            return self.__class__(train), self.__class__(test)
+            return self.__class__(train, self.root), self.__class__(test, self.root)
 
         except AssertionError as error:
             logging.exception(error)

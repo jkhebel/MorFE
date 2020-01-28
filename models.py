@@ -13,35 +13,114 @@ def VGG16(pretrained=False):
     return net
 
 
+def VGG19_BN(pretrained=False):
+    # Define Model
+    net = tv.models.vgg19_bn(pretrained=pretrained, progress=True)
+    net.features[0] = torch.nn.Conv2d(5, 64, 3, stride=(1, 1), padding=(1, 1))
+    net.classifier[-1] = torch.nn.Linear(4096, 2, bias=True)
+
+    return net
+
+
+def RESNET50(pretrained=False):
+    # Define Model
+    net = tv.models.resnet50(pretrained=pretrained, progress=True)
+    net.conv1 = torch.nn.Conv2d(5, 64, 7, stride=(2, 2), padding=(3, 3))
+    net.fc = torch.nn.Linear(2048, 2, bias=True)
+
+    return net
+
+
+def RESNET101(pretrained=False):
+    # Define Model
+    net = tv.models.resnet101(pretrained=pretrained, progress=True)
+    net.conv1 = torch.nn.Conv2d(5, 64, 7, stride=(2, 2), padding=(3, 3))
+    net.fc = torch.nn.Linear(4096, 2, bias=True)
+
+    return net
+
+
+def RESNET152(pretrained=False):
+    # Define Model
+    net = tv.models.resnet152(pretrained=pretrained, progress=True)
+    net.conv1 = torch.nn.Conv2d(5, 64, 7, stride=(2, 2), padding=(3, 3))
+    net.fc = torch.nn.Linear(4096, 2, bias=True)
+
+    return net
+
+
+def DENSENET161(pretrained=False):
+    # Define Model
+    net = tv.models.densenet161(pretrained=pretrained, progress=True)
+    net.conv1 = torch.nn.Conv2d(5, 96, 7, stride=(2, 2), padding=(3, 3))
+    net.classifier = torch.nn.Linear(2208, 2, bias=True)
+
+    return net
+
+
 # https://ml-cheatsheet.readthedocs.io/en/latest/architectures.html#vae, added center crop function
 class VAE(nn.Module):
-    def __init__(self, in_shape, n_latent):
+    def __init__(self, in_shape, n_classes, n_latent, layers=2, bf=32):
         super().__init__()
         self.in_shape = in_shape
         self.n_latent = n_latent
         c, h, w = in_shape
         self.h_dim = h // 2**2  # receptive field downsampled 2 times
         self.w_dim = w // 2**2  # receptive field downsampled 2 times
-        self.encoder = nn.Sequential(
-            nn.BatchNorm2d(c),
-            nn.Conv2d(c, 32, kernel_size=4, stride=2, padding=1),  # 32, 16, 16
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # 32, 8, 8
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(),
-        )
-        self.z_mean = nn.Linear(64 * self.h_dim * self.w_dim, n_latent)
-        self.z_var = nn.Linear(64 * self.h_dim * self.w_dim, n_latent)
+        self.layers = layers
+        self.bf = bf
 
-        self.z_develop = nn.Linear(n_latent, 64 * self.h_dim * self.w_dim)
+        enc_layers = [nn.BatchNorm2d(c)]
+        for layer in range(layers):
+            i = c if (layer == 0) else (bf * (layer))
+            o = bf * (layer + 1)
+            print(layer, i, o)
+            enc_layers.extend([
+                nn.Conv2d(i, o, kernel_size=4, stride=2,
+                          padding=1),  # 32, 16, 16
+                nn.BatchNorm2d(o),
+                nn.LeakyReLU()
+            ])
+        self.encoder = nn.Sequential(*enc_layers)
 
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=0),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 5, kernel_size=3, stride=2, padding=1),
-        )
+        # self.encoder = nn.Sequential(
+        #     nn.BatchNorm2d(c),
+        #     nn.Conv2d(c, 32, kernel_size=4, stride=2, padding=1),  # 32, 16, 16
+        #     nn.BatchNorm2d(32),
+        #     nn.LeakyReLU(),
+        #     nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # 32, 8, 8
+        #     nn.BatchNorm2d(64),
+        #     nn.LeakyReLU(),
+        # )
+
+        self.z_mean = nn.Linear(
+            layers * bf * self.h_dim * self.w_dim, n_latent)
+        self.z_var = nn.Linear(layers * bf * self.h_dim * self.w_dim, n_latent)
+        self.z_develop = nn.Linear(
+            n_latent, layers * bf * self.h_dim * self.w_dim)
+
+        dec_layers = []
+        for layer in reversed(range(1, layers)):
+            i = bf * (layer + 1)
+            o = bf * layer
+            print(layer, i, o)
+            dec_layers.extend([
+                nn.ConvTranspose2d(i, o, kernel_size=3, stride=2, padding=0),
+                nn.BatchNorm2d(o),
+                nn.ReLU(),
+            ])
+        dec_layers.extend([
+            nn.ConvTranspose2d(bf, n_classes, kernel_size=3,
+                               stride=2, padding=1)
+        ])
+        self.decoder = nn.Sequential(*enc_layers)
+
+        # self.decoder = nn.Sequential(
+        #     nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=0),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.ConvTranspose2d(32, 5, kernel_size=3, stride=2, padding=1),
+        # )
 
     def center_crop(self, img, h, w):
         crop_h = torch.FloatTensor([img.size()[2]]).sub(h).div(-2)
@@ -67,7 +146,8 @@ class VAE(nn.Module):
     def decode(self, z):
         _, h, w = self.in_shape
         out = self.z_develop(z)
-        out = out.view(z.size(0), 64, self.h_dim, self.w_dim)
+        out = out.view(z.size(0), self.layers *
+                       self.bf, self.h_dim, self.w_dim)
         out = self.decoder(out)
         out = self.center_crop(out, h, w)
         out = nn.Sigmoid()(out)
@@ -78,6 +158,71 @@ class VAE(nn.Module):
         z = self.sample_z(mean, logvar)
         out = self.decode(z)
         return out, mean, logvar
+
+
+# # VAE 2
+#
+# class Flatten(nn.Module):
+#     def forward(self, input):
+#         return input.view(input.size(0), -1)
+#
+#
+# class UnFlatten(nn.Module):
+#     def forward(self, input, size=1024):
+#         return input.view(input.size(0), size, 1, 1)
+#
+#
+# class VAE(nn.Module):
+#     def __init__(self, image_channels=5, h_dim=1024, z_dim=32):
+#         super(VAE, self).__init__()
+#         self.encoder = nn.Sequential(
+#             nn.Conv2d(image_channels, 32, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(64, 128, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(128, 256, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             Flatten()
+#         )
+#
+#         self.fc1 = nn.Linear(h_dim, z_dim)
+#         self.fc2 = nn.Linear(h_dim, z_dim)
+#         self.fc3 = nn.Linear(z_dim, h_dim)
+#
+#         self.decoder = nn.Sequential(
+#             UnFlatten(),
+#             nn.ConvTranspose2d(h_dim, 128, kernel_size=5, stride=2),
+#             nn.ReLU(),
+#             nn.ConvTranspose2d(128, 64, kernel_size=5, stride=2),
+#             nn.ReLU(),
+#             nn.ConvTranspose2d(64, 32, kernel_size=6, stride=2),
+#             nn.ReLU(),
+#             nn.ConvTranspose2d(32, image_channels, kernel_size=6, stride=2),
+#             nn.Sigmoid(),
+#         )
+#
+#     def reparameterize(self, mu, logvar):
+#         std = logvar.mul(0.5).exp_()
+#         # return torch.normal(mu, std)
+#         esp = torch.randn(*mu.size())
+#         z = mu + std * esp
+#         return z
+#
+#     def bottleneck(self, h):
+#         mu, logvar = self.fc1(h), self.fc2(h)
+#         z = self.reparameterize(mu, logvar)
+#         return z, mu, logvar
+#
+#     def representation(self, x):
+#         return self.bottleneck(self.encoder(x))[0]
+#
+#     def forward(self, x):
+#         h = self.encoder(x)
+#         z, mu, logvar = self.bottleneck(h)
+#         z = self.fc3(z)
+#         return self.decoder(z), mu, logvar
 
 
 # VGG(

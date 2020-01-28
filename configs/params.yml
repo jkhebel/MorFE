@@ -1,8 +1,11 @@
 # Model parameters -------------------------
-
+network: 'vgg16'
 epochs: 300
-batch_size: 6
+batch_size: 16
+max_batches: 0
 label_classes: 2
 csv_file: "./data/mini.csv"
 debug: False
+parallel: True
 split: 0.8
+data_path: './data/raw/'
