@@ -97,145 +97,158 @@ def train(network, csv_file, data_path, debug, epochs,
 
     print("\n\nTraining...\n")
 
-    # Training
-    for epoch in range(epochs):  # Iter through epochcs
-        cum_loss = 0
-        tr_predictions = []
-        tr_labels = []
-        msg = f"Training epoch {epoch+1}: "
-        for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, max_batches or len(train_loader)):
-            x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
-            o = net(x)  # Forward pass
-            optimizer.zero_grad()  # Reset gradients
-            loss = criterion(o, y)  # Compute Loss
-            loss.backward()  # Propagate loss, compute gradients
-            optimizer.step()  # Update weights
+    try:
+        # Training
+        for epoch in range(epochs):  # Iter through epochcs
+            cum_loss = 0
+            tr_predictions = []
+            tr_labels = []
+            msg = f"Training epoch {epoch+1}: "
+            for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, max_batches or len(train_loader)):
+                x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
+                o = net(x)  # Forward pass
+                optimizer.zero_grad()  # Reset gradients
+                loss = criterion(o, y)  # Compute Loss
+                loss.backward()  # Propagate loss, compute gradients
+                optimizer.step()  # Update weights
 
-            cum_loss += loss.item()
+                cum_loss += loss.item()
 
-            _, predicted = torch.max(o.data, 1)
-            tr_predictions.append(predicted)
-            tr_labels.append(y)
+                _, predicted = torch.max(o.data, 1)
+                tr_predictions.append(predicted)
+                tr_labels.append(y)
 
-            grid = torchvision.utils.make_grid(
-                x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
-                nrow=5
-            )
+                grid = torchvision.utils.make_grid(
+                    x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
+                    nrow=5
+                )
 
-            writer.add_image('Image_batch', grid, epoch *
-                             max_batches + batch_n)
-            writer.add_scalar(
-                'tr_accuracy',
-                metrics.accuracy_score(y.cpu(), predicted.cpu()),
-                epoch * max_batches + batch_n
-            )
-            writer.add_scalar(
-                'tr_F1',
-                metrics.f1_score(y.cpu(), predicted.cpu(), zero_division=0),
-                epoch * max_batches + batch_n
-            )
-            writer.add_scalar(
-                'tr_precision',
-                metrics.precision_score(
-                    y.cpu(), predicted.cpu(), zero_division=0),
-                epoch * max_batches + batch_n
-            )
-            writer.add_scalar(
-                'tr_recall',
-                metrics.recall_score(
-                    y.cpu(), predicted.cpu(), zero_division=0),
-                epoch * max_batches + batch_n
-            )
-            try:
+                writer.add_image('Image_batch', grid, epoch *
+                                 max_batches + batch_n)
                 writer.add_scalar(
-                    'tr_auroc',
-                    metrics.roc_auc_score(y.cpu(), predicted.cpu()),
+                    'tr_accuracy',
+                    metrics.accuracy_score(y.cpu(), predicted.cpu()),
                     epoch * max_batches + batch_n
                 )
-            except:
-                logging.debug("Couldn't write auroc to board")
-            writer.add_scalar(
-                'loss',
-                loss,
-                epoch * max_batches + batch_n
-            )
+                writer.add_scalar(
+                    'tr_F1',
+                    metrics.f1_score(y.cpu(), predicted.cpu(),
+                                     zero_division=0),
+                    epoch * max_batches + batch_n
+                )
+                writer.add_scalar(
+                    'tr_precision',
+                    metrics.precision_score(
+                        y.cpu(), predicted.cpu(), zero_division=0),
+                    epoch * max_batches + batch_n
+                )
+                writer.add_scalar(
+                    'tr_recall',
+                    metrics.recall_score(
+                        y.cpu(), predicted.cpu(), zero_division=0),
+                    epoch * max_batches + batch_n
+                )
+                try:
+                    writer.add_scalar(
+                        'tr_auroc',
+                        metrics.roc_auc_score(y.cpu(), predicted.cpu()),
+                        epoch * max_batches + batch_n
+                    )
+                except:
+                    logging.debug("Couldn't write auroc to board")
+                writer.add_scalar(
+                    'loss',
+                    loss,
+                    epoch * max_batches + batch_n
+                )
 
-        tr_predictions = torch.cat(tr_predictions, dim=0).cpu()
-        tr_labels = torch.cat(tr_labels, dim=0).cpu()
-        print(f"Training loss: {cum_loss/max_batches:.2f}")
+            tr_predictions = torch.cat(tr_predictions, dim=0).cpu()
+            tr_labels = torch.cat(tr_labels, dim=0).cpu()
+            print(f"Training loss: {cum_loss/max_batches:.2f}")
 
+            torch.save(net.state_dict(),
+                       f"{data_path}/models/{net.__class__.__name__}"
+                       f"_b{batch_size}-{max_batches}_e{epochs}"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                       )
+
+            with torch.no_grad():
+
+                ts_predictions = []
+                ts_labels = []
+                # Iter through batches
+                msg = f"Testing epoch {epoch+1}: "
+                ttl = np.ceil((1 - split) * max_batches) or len(test_loader)
+                for batch_n, (X, Y) in tqdm(enumerate(test_loader), msg, ttl):
+                    # Move batch samples to gpu
+                    x, y = X.to(device), Y.to(device)
+                    o = net(x)  # Forward pass
+
+                    _, predicted = torch.max(o.data, 1)
+                    ts_predictions.append(predicted)
+                    ts_labels.append(y)
+
+                    if debug:
+                        tqdm.write(f"\ny : o\n-----")
+                        for i in range(len(y)):
+                            tqdm.write(f"{y[i]} : {predicted[i]}")
+
+                    if (batch_n > ttl):
+                        break
+
+                ts_predictions = torch.cat(ts_predictions, dim=0).cpu()
+                ts_labels = torch.cat(ts_labels, dim=0).cpu()
+
+                print(f"Epoch {epoch}:")
+                # Metrics
+                tr_acc = metrics.accuracy_score(tr_labels, tr_predictions)
+                acc = metrics.accuracy_score(ts_labels, ts_predictions)
+                print(
+                    f'Accuracy of the network on the train images: {tr_acc:0.2f}')
+                print(
+                    f'Accuracy of the network on the test images: {acc:0.2f}')
+
+                tr_F1 = metrics.f1_score(
+                    tr_labels, tr_predictions, zero_division=0)
+                F1 = metrics.f1_score(
+                    ts_labels, ts_predictions, zero_division=0)
+                print(f'F1 of the network on the train images: {tr_F1:0.2f}')
+                print(f'F1 of the network on the test images: {F1:0.2f}')
+
+                tr_auroc = metrics.roc_auc_score(tr_labels, tr_predictions)
+                auroc = metrics.roc_auc_score(ts_labels, ts_predictions)
+                print(
+                    f'AUROC of the network on the train images: {tr_auroc:0.2f}')
+                print(f'AUROC of the network on the test images: {auroc:0.2f}')
+
+                try:
+                    writer.add_image('Image_batch', grid)
+                    writer.add_scalar(
+                        'accuracy',
+                        acc,
+                        epoch * ttl + batch_n
+                    )
+                    writer.add_scalar(
+                        'F1',
+                        F1,
+                        epoch * ttl + batch_n
+                    )
+                    writer.add_scalar(
+                        'auroc',
+                        auroc,
+                        epoch * ttl + batch_n
+                    )
+                except:
+                    pass
+
+                scheduler.step(F1)
+
+    except (KeyboardInterrupt, SystemExit):
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_b{batch_size}-{max_batches}_e{epochs}"
                    f"_{time.strftime('%Y-%m-%d_%H-%M')}"
                    )
-
-        with torch.no_grad():
-
-            ts_predictions = []
-            ts_labels = []
-            # Iter through batches
-            msg = f"Testing epoch {epoch+1}: "
-            ttl = np.ceil((1 - split) * max_batches) or len(test_loader)
-            for batch_n, (X, Y) in tqdm(enumerate(test_loader), msg, ttl):
-                x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
-                o = net(x)  # Forward pass
-
-                _, predicted = torch.max(o.data, 1)
-                ts_predictions.append(predicted)
-                ts_labels.append(y)
-
-                if debug:
-                    tqdm.write(f"\ny : o\n-----")
-                    for i in range(len(y)):
-                        tqdm.write(f"{y[i]} : {predicted[i]}")
-
-                if (batch_n > ttl):
-                    break
-
-            ts_predictions = torch.cat(ts_predictions, dim=0).cpu()
-            ts_labels = torch.cat(ts_labels, dim=0).cpu()
-
-            print(f"Epoch {epoch}:")
-            # Metrics
-            tr_acc = metrics.accuracy_score(tr_labels, tr_predictions)
-            acc = metrics.accuracy_score(ts_labels, ts_predictions)
-            print(
-                f'Accuracy of the network on the train images: {tr_acc:0.2f}')
-            print(f'Accuracy of the network on the test images: {acc:0.2f}')
-
-            tr_F1 = metrics.f1_score(
-                tr_labels, tr_predictions, zero_division=0)
-            F1 = metrics.f1_score(ts_labels, ts_predictions, zero_division=0)
-            print(f'F1 of the network on the train images: {tr_F1:0.2f}')
-            print(f'F1 of the network on the test images: {F1:0.2f}')
-
-            tr_auroc = metrics.roc_auc_score(tr_labels, tr_predictions)
-            auroc = metrics.roc_auc_score(ts_labels, ts_predictions)
-            print(f'AUROC of the network on the train images: {tr_auroc:0.2f}')
-            print(f'AUROC of the network on the test images: {auroc:0.2f}')
-
-            try:
-                writer.add_image('Image_batch', grid)
-                writer.add_scalar(
-                    'accuracy',
-                    acc,
-                    epoch * ttl + batch_n
-                )
-                writer.add_scalar(
-                    'F1',
-                    F1,
-                    epoch * ttl + batch_n
-                )
-                writer.add_scalar(
-                    'auroc',
-                    auroc,
-                    epoch * ttl + batch_n
-                )
-            except:
-                pass
-
-            scheduler.step(F1)
 
 
 if __name__ == '__main__':

@@ -104,46 +104,56 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
 
     print("Training...")
 
-    # Training
-    for epoch in range(epochs):  # Iter through epochcs
-        cum_loss = 0
-        msg = f"Training epoch {epoch+1}: "
-        ttl = max_batches or len(train_loader)  # Iter through batches
-        for batch_n, (X, _) in tqdm(enumerate(train_loader), msg, ttl):
-            x = X.to(device)  # Move batch samples to gpu
+    try:
+        # Training
+        for epoch in range(epochs):  # Iter through epochcs
+            cum_loss = 0
+            msg = f"Training epoch {epoch+1}: "
+            ttl = max_batches or len(train_loader)  # Iter through batches
+            for batch_n, (X, _) in tqdm(enumerate(train_loader), msg, ttl):
+                x = X.to(device)  # Move batch samples to gpu
 
-            o, u, logvar = net(x)  # Forward pass
-            optimizer.zero_grad()  # Reset gradients
-            loss = vae_loss(o, x, u, logvar)  # Compute Loss
-            loss.backward()  # Propagate loss, compute gradients
-            optimizer.step()  # Update weights
+                o, u, logvar = net(x)  # Forward pass
+                optimizer.zero_grad()  # Reset gradients
+                loss = vae_loss(o, x, u, logvar)  # Compute Loss
+                loss.backward()  # Propagate loss, compute gradients
+                optimizer.step()  # Update weights
 
-            cum_loss += loss.item()
+                cum_loss += loss.item()
 
-            in_grid = torchvision.utils.make_grid(
-                x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
-                nrow=5
-            )
-            out_grid = torchvision.utils.make_grid(
-                o.view(5 * batch_size, 1, o.shape[-2], o.shape[-1]),
-                nrow=5
-            )
+                in_grid = torchvision.utils.make_grid(
+                    x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
+                    nrow=5
+                )
+                out_grid = torchvision.utils.make_grid(
+                    o.view(5 * batch_size, 1, o.shape[-2], o.shape[-1]),
+                    nrow=5
+                )
 
-            writer.add_image('Input', in_grid, epoch * max_batches + batch_n)
-            writer.add_image('Output', out_grid, epoch * max_batches + batch_n)
-            writer.add_scalar(
-                'loss',
-                loss,
-                epoch * max_batches + batch_n
-            )
+                writer.add_image('Input', in_grid, epoch *
+                                 max_batches + batch_n)
+                writer.add_image('Output', out_grid, epoch *
+                                 max_batches + batch_n)
+                writer.add_scalar(
+                    'loss',
+                    loss,
+                    epoch * max_batches + batch_n
+                )
 
+            torch.save(net.state_dict(),
+                       f"{data_path}/models/{net.__class__.__name__}"
+                       f"_b{batch_size}-{max_batches}_e{epochs}"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                       )
+
+            print(f"Training loss: {cum_loss:.2f}")
+
+    except (KeyboardInterrupt, SystemExit):
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_b{batch_size}-{max_batches}_e{epochs}"
                    f"_{time.strftime('%Y-%m-%d_%H-%M')}"
                    )
-
-        print(f"Training loss: {cum_loss:.2f}")
 
 
 if __name__ == '__main__':
