@@ -35,7 +35,7 @@ def RESNET101(pretrained=False):
     # Define Model
     net = tv.models.resnet101(pretrained=pretrained, progress=True)
     net.conv1 = torch.nn.Conv2d(5, 64, 7, stride=(2, 2), padding=(3, 3))
-    net.fc = torch.nn.Linear(4096, 2, bias=True)
+    net.fc = torch.nn.Linear(2048, 2, bias=True)
 
     return net
 
@@ -44,7 +44,7 @@ def RESNET152(pretrained=False):
     # Define Model
     net = tv.models.resnet152(pretrained=pretrained, progress=True)
     net.conv1 = torch.nn.Conv2d(5, 64, 7, stride=(2, 2), padding=(3, 3))
-    net.fc = torch.nn.Linear(4096, 2, bias=True)
+    net.fc = torch.nn.Linear(2048, 2, bias=True)
 
     return net
 
@@ -54,19 +54,23 @@ def DENSENET161(pretrained=False):
     net = tv.models.densenet161(pretrained=pretrained, progress=True)
     net.conv1 = torch.nn.Conv2d(5, 96, 7, stride=(2, 2), padding=(3, 3))
     net.classifier = torch.nn.Linear(2208, 2, bias=True)
-
+    net
     return net
+
+# https://becominghuman.ai/variational-autoencoders-for-new-fruits-with-keras-and-pytorch-6d0cfc4eeabd
 
 
 # https://ml-cheatsheet.readthedocs.io/en/latest/architectures.html#vae, added center crop function
-class VAE(nn.Module):
+
+
+class VAE2(nn.Module):
     def __init__(self, in_shape, n_classes, n_latent, layers=2, bf=32):
         super().__init__()
         self.in_shape = in_shape
         self.n_latent = n_latent
         c, h, w = in_shape
-        self.h_dim = h // 2**2  # receptive field downsampled 2 times
-        self.w_dim = w // 2**2  # receptive field downsampled 2 times
+        self.h_dim = h // 2**layers  # receptive field downsampled 2 times
+        self.w_dim = w // 2**layers  # receptive field downsampled 2 times
         self.layers = layers
         self.bf = bf
 
@@ -74,7 +78,6 @@ class VAE(nn.Module):
         for layer in range(layers):
             i = c if (layer == 0) else (bf * (layer))
             o = bf * (layer + 1)
-            print(layer, i, o)
             enc_layers.extend([
                 nn.Conv2d(i, o, kernel_size=4, stride=2,
                           padding=1),  # 32, 16, 16
@@ -82,16 +85,6 @@ class VAE(nn.Module):
                 nn.LeakyReLU()
             ])
         self.encoder = nn.Sequential(*enc_layers)
-
-        # self.encoder = nn.Sequential(
-        #     nn.BatchNorm2d(c),
-        #     nn.Conv2d(c, 32, kernel_size=4, stride=2, padding=1),  # 32, 16, 16
-        #     nn.BatchNorm2d(32),
-        #     nn.LeakyReLU(),
-        #     nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # 32, 8, 8
-        #     nn.BatchNorm2d(64),
-        #     nn.LeakyReLU(),
-        # )
 
         self.z_mean = nn.Linear(
             layers * bf * self.h_dim * self.w_dim, n_latent)
@@ -103,7 +96,6 @@ class VAE(nn.Module):
         for layer in reversed(range(1, layers)):
             i = bf * (layer + 1)
             o = bf * layer
-            print(layer, i, o)
             dec_layers.extend([
                 nn.ConvTranspose2d(i, o, kernel_size=3, stride=2, padding=0),
                 nn.BatchNorm2d(o),
@@ -113,14 +105,7 @@ class VAE(nn.Module):
             nn.ConvTranspose2d(bf, n_classes, kernel_size=3,
                                stride=2, padding=1)
         ])
-        self.decoder = nn.Sequential(*enc_layers)
-
-        # self.decoder = nn.Sequential(
-        #     nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=0),
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-        #     nn.ConvTranspose2d(32, 5, kernel_size=3, stride=2, padding=1),
-        # )
+        self.decoder = nn.Sequential(*dec_layers)
 
     def center_crop(self, img, h, w):
         crop_h = torch.FloatTensor([img.size()[2]]).sub(h).div(-2)
@@ -133,7 +118,7 @@ class VAE(nn.Module):
 
     def sample_z(self, mean, logvar):
         stddev = torch.exp(0.5 * logvar)
-        noise = torch.Tensor(torch.randn(stddev.size()))
+        noise = stddev.new_tensor(torch.randn(stddev.size()))
         return (noise * stddev) + mean
 
     def encode(self, x):
@@ -160,113 +145,117 @@ class VAE(nn.Module):
         return out, mean, logvar
 
 
-# # VAE 2
-#
-# class Flatten(nn.Module):
-#     def forward(self, input):
-#         return input.view(input.size(0), -1)
-#
-#
-# class UnFlatten(nn.Module):
-#     def forward(self, input, size=1024):
-#         return input.view(input.size(0), size, 1, 1)
-#
-#
-# class VAE(nn.Module):
-#     def __init__(self, image_channels=5, h_dim=1024, z_dim=32):
-#         super(VAE, self).__init__()
-#         self.encoder = nn.Sequential(
-#             nn.Conv2d(image_channels, 32, kernel_size=4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(64, 128, kernel_size=4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(128, 256, kernel_size=4, stride=2),
-#             nn.ReLU(),
-#             Flatten()
+# class Autoencoder(nn.Model):
+#     def __init__(self, in_channels, out_channels, bf=16):
+#         super().__init__()
+#         self.encoder = nn.Sequential(  # 5x512x512
+#             nn.Conv2d(in_channels, bf, k, s, p)
+#             nn.Conv2d(in_channels, 16, 3, stride=3,
+#                       padding=1),  # b, 16, 10, 10
+#             nn.ReLU(True),
+#             nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
+#             nn.Conv2d(16, 8, 3, stride=2, padding=1),  # b, 8, 3, 3
+#             nn.ReLU(True),
+#             nn.MaxPool2d(2, stride=1)  # b, 8, 2, 2
 #         )
-#
-#         self.fc1 = nn.Linear(h_dim, z_dim)
-#         self.fc2 = nn.Linear(h_dim, z_dim)
-#         self.fc3 = nn.Linear(z_dim, h_dim)
-#
 #         self.decoder = nn.Sequential(
-#             UnFlatten(),
-#             nn.ConvTranspose2d(h_dim, 128, kernel_size=5, stride=2),
-#             nn.ReLU(),
-#             nn.ConvTranspose2d(128, 64, kernel_size=5, stride=2),
-#             nn.ReLU(),
-#             nn.ConvTranspose2d(64, 32, kernel_size=6, stride=2),
-#             nn.ReLU(),
-#             nn.ConvTranspose2d(32, image_channels, kernel_size=6, stride=2),
-#             nn.Sigmoid(),
+#             nn.ConvTranspose2d(8, 16, 3, stride=2),  # b, 16, 5, 5
+#             nn.ReLU(True),
+#             nn.ConvTranspose2d(16, 8, 5, stride=3, padding=1),  # b, 8, 15, 15
+#             nn.ReLU(True),
+#             nn.ConvTranspose2d(8, out_channels, 2, stride=2,
+#                                padding=1),  # b, 1, 28, 28
+#             nn.Tanh()
 #         )
-#
-#     def reparameterize(self, mu, logvar):
-#         std = logvar.mul(0.5).exp_()
-#         # return torch.normal(mu, std)
-#         esp = torch.randn(*mu.size())
-#         z = mu + std * esp
-#         return z
-#
-#     def bottleneck(self, h):
-#         mu, logvar = self.fc1(h), self.fc2(h)
-#         z = self.reparameterize(mu, logvar)
-#         return z, mu, logvar
-#
-#     def representation(self, x):
-#         return self.bottleneck(self.encoder(x))[0]
 #
 #     def forward(self, x):
-#         h = self.encoder(x)
-#         z, mu, logvar = self.bottleneck(h)
-#         z = self.fc3(z)
-#         return self.decoder(z), mu, logvar
+#         x = self.encoder(x)
+#         x = self.decoder(x)
+#         return x
 
 
-# VGG(
-#   (features): Sequential(
-#     (0): Conv2d(5, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (1): ReLU(inplace=True)
-#     (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (3): ReLU(inplace=True)
-#     (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-#     (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (6): ReLU(inplace=True)
-#     (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (8): ReLU(inplace=True)
-#     (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-#     (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (11): ReLU(inplace=True)
-#     (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (13): ReLU(inplace=True)
-#     (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (15): ReLU(inplace=True)
-#     (16): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-#     (17): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (18): ReLU(inplace=True)
-#     (19): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (20): ReLU(inplace=True)
-#     (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (22): ReLU(inplace=True)
-#     (23): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-#     (24): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (25): ReLU(inplace=True)
-#     (26): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (27): ReLU(inplace=True)
-#     (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-#     (29): ReLU(inplace=True)
-#     (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-#   )
-#   (avgpool): AdaptiveAvgPool2d(output_size=(7, 7))
-#   (classifier): Sequential(
-#     (0): Linear(in_features=25088, out_features=4096, bias=True)
-#     (1): ReLU(inplace=True)
-#     (2): Dropout(p=0.5, inplace=False)
-#     (3): Linear(in_features=4096, out_features=4096, bias=True)
-#     (4): ReLU(inplace=True)
-#     (5): Dropout(p=0.5, inplace=False)
-#     (6): Linear(in_features=4096, out_features=2, bias=True)
-#   )
-# )
+class Conv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super(Conv, self).__init__()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size,
+                      stride, padding, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU()
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class ConvTranspose(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super(ConvTranspose, self).__init__()
+
+        self.conv = nn.Sequential(
+            nn.ConvTranspose2d(in_channels, out_channels,
+                               kernel_size, stride, padding, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU()
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class VAE(nn.Module):
+    def __init__(self):
+        super(VAE, self).__init__()
+
+        base = 16
+
+        self.encoder = nn.Sequential(
+            Conv(5, base, 3, stride=2, padding=1),
+            Conv(base, 2 * base, 3, padding=1),
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
+            Conv(2 * base, 2 * base, 3, padding=1),
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
+            Conv(2 * base, 4 * base, 3, padding=1),
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
+            Conv(4 * base, 4 * base, 3, padding=1),
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
+            nn.Conv2d(4 * base, 64 * base, 8),
+            nn.LeakyReLU()
+        )
+        self.encoder_mu = nn.Conv2d(64 * base, 32 * base, 1)
+        self.encoder_logvar = nn.Conv2d(64 * base, 32 * base, 1)
+
+        self.decoder = nn.Sequential(
+            nn.Conv2d(32 * base, 64 * base, 1),
+            ConvTranspose(64 * base, 4 * base, 8),
+            Conv(4 * base, 4 * base, 3, padding=1),
+            ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
+            Conv(4 * base, 4 * base, 3, padding=1),
+            ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
+            Conv(4 * base, 2 * base, 3, padding=1),
+            ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
+            Conv(2 * base, 2 * base, 3, padding=1),
+            ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
+            Conv(2 * base, base, 3, padding=1),
+            ConvTranspose(base, base, 4, stride=2, padding=1),
+            nn.Conv2d(base, 5, 3, padding=1),
+            nn.Tanh()
+        )
+
+    def encode(self, x):
+        x = self.encoder(x)
+        return self.encoder_mu(x), self.encoder_logvar(x)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
