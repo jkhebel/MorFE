@@ -1,5 +1,6 @@
 ./data/
 data/
+runs/
 _posts/
 .python-version
 __pycache__

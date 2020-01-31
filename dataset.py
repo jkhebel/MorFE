@@ -55,8 +55,14 @@ class HCSData(torch.utils.data.Dataset):
     def class_weights(self):
         a = len(self.df[self.df['ROLE'] == 'mock'])
         b = len(self.df[self.df['ROLE'] == 'compound'])
-        total = a + b
-        return torch.Tensor([1 - (a / total), 1 - (b / total)])
+        max = np.max([a, b])
+        weights = []
+        for sample in self.df['ROLE']:
+            if sample == 'mock':
+                weights.append(max / a)
+            else:
+                weights.append(max / b)
+        return weights
 
     def __len__(self):
         return len(self.df)
@@ -87,6 +93,12 @@ class HCSData(torch.utils.data.Dataset):
         a[label] = 1
         return a.type(torch.float)
 
+    def __crop_center__(self, img, cropx, cropy):
+        y, x = img.shape
+        startx = x // 2 - (cropx // 2)
+        starty = y // 2 - (cropy // 2)
+        return img[starty:starty + cropy, startx:startx + cropx]
+
     def __load_img__(self, sample):
         """
         Load each image channel for the given sample and stack them into a
@@ -111,8 +123,15 @@ class HCSData(torch.utils.data.Dataset):
             f"BBBC022_v1_images_{plate}w5/{sample['FileMito']}"
         mito = plt.imread(mito_path)
 
+        channels = [hoechst, er, syto, ph, mito]
+
+        # crop and normalize each channel individually
+        for i, c in enumerate(channels):
+            c = self.__crop_center__(c, 512, 512)
+            channels[i] = (c - c.mean()) / c.std()
+
         # Stack images in channel (x, y, c) dimension
-        img = np.stack([hoechst, er, syto, ph, mito])
+        img = np.stack(channels)
 
         return img.astype(np.float64())
 
