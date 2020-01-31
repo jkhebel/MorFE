@@ -1,15 +1,22 @@
+import time
 from tqdm import tqdm
 import click
 import yaml
 import logging
 
-# import cli_args
 import numpy as np
 from sklearn import metrics
+
 import torch
+import torchvision
+from torch.utils.tensorboard import SummaryWriter
 
 from dataset import HCSData
 import models
+
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
 
 
 # Parameters
@@ -43,15 +50,24 @@ def train(network, csv_file, data_path, debug, epochs,
 
     # Set up gpu/cpu device
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    logging.debug(f"Device: {torch.cuda.get_device_name(0)}")
+    try:
+        logging.debug(f"Device: {torch.cuda.get_device_name(0)}")
+    except AssertionError as e:
+        logging.debug(e)
 
     # Dataset
     data = HCSData.from_csv(csv_file, data_path)  # Load dataset
     train, test = data.split(0.8)  # Split data into train and test
     logging.debug(f"Data loaded and split")
 
+    # Sampler (random weighted)
+    class_weights = train.class_weights
+    sampler = torch.utils.data.WeightedRandomSampler(
+        class_weights, max_batches * batch_size or len(class_weights),
+        replacement=False)
+
     train_loader = torch.utils.data.DataLoader(  # Generate a training data loader
-        train, batch_size=batch_size, shuffle=True
+        train, batch_size=batch_size, sampler=sampler
     )
     test_loader = torch.utils.data.DataLoader(  # Generate a testing data loader
         test, batch_size=batch_size, shuffle=True)
@@ -68,10 +84,14 @@ def train(network, csv_file, data_path, debug, epochs,
         logging.debug(f"Parallelized to {torch.cuda.device_count()} GPUs")
     net.to(device)  # Move model to device
 
+    writer = SummaryWriter(
+        f"{data_path}/runs/{net.__class__.__name__}"
+        f"_b{batch_size}-{max_batches}_e{epochs}"
+        f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+    )
+
     # Define loss and optimizer
-    class_weights = data.class_weights.to(device)
-    logging.debug(f"Class weights: {class_weights}")
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters())
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
 
@@ -83,10 +103,8 @@ def train(network, csv_file, data_path, debug, epochs,
         tr_predictions = []
         tr_labels = []
         msg = f"Training epoch {epoch+1}: "
-        ttl = max_batches or len(train_loader)  # Iter through batches
-        for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, ttl):
+        for batch_n, (X, Y) in tqdm(enumerate(train_loader), msg, max_batches or len(train_loader)):
             x, y = X.to(device), Y.to(device)  # Move batch samples to gpu
-
             o = net(x)  # Forward pass
             optimizer.zero_grad()  # Reset gradients
             loss = criterion(o, y)  # Compute Loss
@@ -99,12 +117,58 @@ def train(network, csv_file, data_path, debug, epochs,
             tr_predictions.append(predicted)
             tr_labels.append(y)
 
-            if (batch_n > ttl):
-                break
+            grid = torchvision.utils.make_grid(
+                x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
+                nrow=5
+            )
+
+            writer.add_image('Image_batch', grid, epoch *
+                             max_batches + batch_n)
+            writer.add_scalar(
+                'tr_accuracy',
+                metrics.accuracy_score(y.cpu(), predicted.cpu()),
+                epoch * max_batches + batch_n
+            )
+            writer.add_scalar(
+                'tr_F1',
+                metrics.f1_score(y.cpu(), predicted.cpu(), zero_division=0),
+                epoch * max_batches + batch_n
+            )
+            writer.add_scalar(
+                'tr_precision',
+                metrics.precision_score(
+                    y.cpu(), predicted.cpu(), zero_division=0),
+                epoch * max_batches + batch_n
+            )
+            writer.add_scalar(
+                'tr_recall',
+                metrics.recall_score(
+                    y.cpu(), predicted.cpu(), zero_division=0),
+                epoch * max_batches + batch_n
+            )
+            try:
+                writer.add_scalar(
+                    'tr_auroc',
+                    metrics.roc_auc_score(y.cpu(), predicted.cpu()),
+                    epoch * max_batches + batch_n
+                )
+            except:
+                logging.debug("Couldn't write auroc to board")
+            writer.add_scalar(
+                'loss',
+                loss,
+                epoch * max_batches + batch_n
+            )
 
         tr_predictions = torch.cat(tr_predictions, dim=0).cpu()
         tr_labels = torch.cat(tr_labels, dim=0).cpu()
-        print(f"Training loss: {cum_loss/ttl:.2f}")
+        print(f"Training loss: {cum_loss/max_batches:.2f}")
+
+        torch.save(net.state_dict(),
+                   f"{data_path}/models/{net.__class__.__name__}"
+                   f"_b{batch_size}-{max_batches}_e{epochs}"
+                   f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                   )
 
         with torch.no_grad():
 
@@ -150,6 +214,26 @@ def train(network, csv_file, data_path, debug, epochs,
             auroc = metrics.roc_auc_score(ts_labels, ts_predictions)
             print(f'AUROC of the network on the train images: {tr_auroc:0.2f}')
             print(f'AUROC of the network on the test images: {auroc:0.2f}')
+
+            try:
+                writer.add_image('Image_batch', grid)
+                writer.add_scalar(
+                    'accuracy',
+                    acc,
+                    epoch * ttl + batch_n
+                )
+                writer.add_scalar(
+                    'F1',
+                    F1,
+                    epoch * ttl + batch_n
+                )
+                writer.add_scalar(
+                    'auroc',
+                    auroc,
+                    epoch * ttl + batch_n
+                )
+            except:
+                pass
 
             scheduler.step(F1)
 
