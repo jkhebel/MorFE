@@ -205,43 +205,77 @@ class ConvTranspose(nn.Module):
 
 
 class VAE(nn.Module):
-    def __init__(self):
+    def __init__(self, base_features=32, latent_features=1024, n_blocks=4):
         super(VAE, self).__init__()
 
-        base = 16
+        ext_features = base_features * (2**n_blocks)
 
-        self.encoder = nn.Sequential(
-            Conv(5, base, 3, stride=2, padding=1),
-            Conv(base, 2 * base, 3, padding=1),
-            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
-            Conv(2 * base, 2 * base, 3, padding=1),
-            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
-            Conv(2 * base, 4 * base, 3, padding=1),
-            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
-            Conv(4 * base, 4 * base, 3, padding=1),
-            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
-            nn.Conv2d(4 * base, 64 * base, 8),
+        enc = [Conv(5, base_features, 1)]
+        for block in range(n_blocks):
+            f_in = base_features * (2**block)
+            f_out = base_features * (2**(block + 1))
+            enc.extend([
+                Conv(f_in, f_in, 3, stride=1, padding=1),
+                Conv(f_in, f_out, 3, padding=1)
+            ])
+        enc.extend([
+            nn.Conv2d(ext_features, latent_features, 3)
+        ])
+        enc.extend([
+            nn.Conv2d(ext_features, latent_features, 8),
             nn.LeakyReLU()
-        )
-        self.encoder_mu = nn.Conv2d(64 * base, 32 * base, 1)
-        self.encoder_logvar = nn.Conv2d(64 * base, 32 * base, 1)
+        ])
+        self.encoder = nn.Sequential(*enc)
+        del enc
 
-        self.decoder = nn.Sequential(
-            nn.Conv2d(32 * base, 64 * base, 1),
-            ConvTranspose(64 * base, 4 * base, 8),
-            Conv(4 * base, 4 * base, 3, padding=1),
-            ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
-            Conv(4 * base, 4 * base, 3, padding=1),
-            ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
-            Conv(4 * base, 2 * base, 3, padding=1),
-            ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
-            Conv(2 * base, 2 * base, 3, padding=1),
-            ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
-            Conv(2 * base, base, 3, padding=1),
-            ConvTranspose(base, base, 4, stride=2, padding=1),
-            nn.Conv2d(base, 5, 3, padding=1),
-            nn.Tanh()
-        )
+        # self.encoder = nn.Sequential(
+        #     Conv(5, base, 3, stride=2, padding=1),
+        #     Conv(base, 2 * base, 3, padding=1),
+        #     Conv(2 * base, 2 * base, 3, stride=2, padding=1),
+        #     Conv(2 * base, 2 * base, 3, padding=1),
+        #     Conv(2 * base, 2 * base, 3, stride=2, padding=1),
+        #     Conv(2 * base, 4 * base, 3, padding=1),
+        #     Conv(4 * base, 4 * base, 3, stride=2, padding=1),
+        #     Conv(4 * base, 4 * base, 3, padding=1),
+        #     Conv(4 * base, 4 * base, 3, stride=2, padding=1),
+        #     nn.Conv2d(4 * base, 64 * base, 8),
+        #     nn.LeakyReLU()
+        # )
+        self.encoder_mu = nn.Conv2d(ext_features, latent_features, 1)
+        self.encoder_logvar = nn.Conv2d(ext_features, latent_features, 1)
+
+        dec = [Conv(latent_features, ext_features, 8)]
+
+        for block in reversed(range(n_blocks)):
+            f_in = base_features * (2**(block + 1))
+            f_out = base_features * (2**block)
+            dec.extend([
+                Conv(f_in, f_in, 3, stride=1, padding=1),
+                Conv(f_in, f_out, 3, padding=1)
+            ])
+        dec.extend([
+            nn.Conv2d(base_features, latent_features, 1),
+            nn.LeakyReLU()
+        ])
+        self.decoder = nn.Sequential(*dec)
+        del dec
+
+        # self.decoder = nn.Sequential(
+        #     nn.Conv2d(32 * base, 64 * base, 1),
+        #     ConvTranspose(64 * base, 4 * base, 8),
+        #     Conv(4 * base, 4 * base, 3, padding=1),
+        #     ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
+        #     Conv(4 * base, 4 * base, 3, padding=1),
+        #     ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
+        #     Conv(4 * base, 2 * base, 3, padding=1),
+        #     ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
+        #     Conv(2 * base, 2 * base, 3, padding=1),
+        #     ConvTranspose(2 * base, 2 * base, 4, stride=2, padding=1),
+        #     Conv(2 * base, base, 3, padding=1),
+        #     ConvTranspose(base, base, 4, stride=2, padding=1),
+        #     nn.Conv2d(base, 5, 3, padding=1),
+        #     nn.Tanh()
+        # )
 
     def encode(self, x):
         x = self.encoder(x)
