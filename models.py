@@ -63,117 +63,6 @@ def DENSENET161(pretrained=False):
 # https://ml-cheatsheet.readthedocs.io/en/latest/architectures.html#vae, added center crop function
 
 
-class VAE2(nn.Module):
-    def __init__(self, in_shape, n_classes, n_latent, layers=2, bf=32):
-        super().__init__()
-        self.in_shape = in_shape
-        self.n_latent = n_latent
-        c, h, w = in_shape
-        self.h_dim = h // 2**layers  # receptive field downsampled 2 times
-        self.w_dim = w // 2**layers  # receptive field downsampled 2 times
-        self.layers = layers
-        self.bf = bf
-
-        enc_layers = [nn.BatchNorm2d(c)]
-        for layer in range(layers):
-            i = c if (layer == 0) else (bf * (layer))
-            o = bf * (layer + 1)
-            enc_layers.extend([
-                nn.Conv2d(i, o, kernel_size=4, stride=2,
-                          padding=1),  # 32, 16, 16
-                nn.BatchNorm2d(o),
-                nn.LeakyReLU()
-            ])
-        self.encoder = nn.Sequential(*enc_layers)
-
-        self.z_mean = nn.Linear(
-            layers * bf * self.h_dim * self.w_dim, n_latent)
-        self.z_var = nn.Linear(layers * bf * self.h_dim * self.w_dim, n_latent)
-        self.z_develop = nn.Linear(
-            n_latent, layers * bf * self.h_dim * self.w_dim)
-
-        dec_layers = []
-        for layer in reversed(range(1, layers)):
-            i = bf * (layer + 1)
-            o = bf * layer
-            dec_layers.extend([
-                nn.ConvTranspose2d(i, o, kernel_size=3, stride=2, padding=0),
-                nn.BatchNorm2d(o),
-                nn.ReLU(),
-            ])
-        dec_layers.extend([
-            nn.ConvTranspose2d(bf, n_classes, kernel_size=3,
-                               stride=2, padding=1)
-        ])
-        self.decoder = nn.Sequential(*dec_layers)
-
-    def center_crop(self, img, h, w):
-        crop_h = torch.FloatTensor([img.size()[2]]).sub(h).div(-2)
-        crop_w = torch.FloatTensor([img.size()[3]]).sub(w).div(-2)
-
-        return F.pad(img, [
-            crop_w.ceil().int()[0], crop_w.floor().int()[0],
-            crop_h.ceil().int()[0], crop_h.floor().int()[0],
-        ])
-
-    def sample_z(self, mean, logvar):
-        stddev = torch.exp(0.5 * logvar)
-        noise = stddev.new_tensor(torch.randn(stddev.size()))
-        return (noise * stddev) + mean
-
-    def encode(self, x):
-        x = self.encoder(x)
-        x = x.view(x.size(0), -1)
-        mean = self.z_mean(x)
-        var = self.z_var(x)
-        return mean, var
-
-    def decode(self, z):
-        _, h, w = self.in_shape
-        out = self.z_develop(z)
-        out = out.view(z.size(0), self.layers *
-                       self.bf, self.h_dim, self.w_dim)
-        out = self.decoder(out)
-        out = self.center_crop(out, h, w)
-        out = nn.Sigmoid()(out)
-        return out
-
-    def forward(self, x):
-        mean, logvar = self.encode(x)
-        z = self.sample_z(mean, logvar)
-        out = self.decode(z)
-        return out, mean, logvar
-
-
-# class Autoencoder(nn.Model):
-#     def __init__(self, in_channels, out_channels, bf=16):
-#         super().__init__()
-#         self.encoder = nn.Sequential(  # 5x512x512
-#             nn.Conv2d(in_channels, bf, k, s, p)
-#             nn.Conv2d(in_channels, 16, 3, stride=3,
-#                       padding=1),  # b, 16, 10, 10
-#             nn.ReLU(True),
-#             nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
-#             nn.Conv2d(16, 8, 3, stride=2, padding=1),  # b, 8, 3, 3
-#             nn.ReLU(True),
-#             nn.MaxPool2d(2, stride=1)  # b, 8, 2, 2
-#         )
-#         self.decoder = nn.Sequential(
-#             nn.ConvTranspose2d(8, 16, 3, stride=2),  # b, 16, 5, 5
-#             nn.ReLU(True),
-#             nn.ConvTranspose2d(16, 8, 5, stride=3, padding=1),  # b, 8, 15, 15
-#             nn.ReLU(True),
-#             nn.ConvTranspose2d(8, out_channels, 2, stride=2,
-#                                padding=1),  # b, 1, 28, 28
-#             nn.Tanh()
-#         )
-#
-#     def forward(self, x):
-#         x = self.encoder(x)
-#         x = self.decoder(x)
-#         return x
-
-
 class Conv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
         super(Conv, self).__init__()
@@ -208,27 +97,32 @@ class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
 
-        base = 16
+        base = 32
+        lf = 512
 
-        self.encoder = nn.Sequential(
-            Conv(5, base, 3, stride=2, padding=1),
-            Conv(base, 2 * base, 3, padding=1),
-            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
-            Conv(2 * base, 2 * base, 3, padding=1),
-            Conv(2 * base, 2 * base, 3, stride=2, padding=1),
-            Conv(2 * base, 4 * base, 3, padding=1),
-            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
-            Conv(4 * base, 4 * base, 3, padding=1),
-            Conv(4 * base, 4 * base, 3, stride=2, padding=1),
-            nn.Conv2d(4 * base, 64 * base, 8),
+        self.encoder = nn.Sequential(  # 5 x 512
+            Conv(5, base, 3, stride=2, padding=1),  # base x 256
+            Conv(base, 2 * base, 3, padding=1),  # 2*base x 256
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),  # 2b x 128
+            Conv(2 * base, 2 * base, 3, padding=1),  # 2b x 128
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),  # 2b x 64
+            Conv(2 * base, 4 * base, 3, padding=1),  # 4b x 64
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 32
+            Conv(4 * base, 4 * base, 3, padding=1),  # 4b x 32
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 16
+            Conv(4 * base, 4 * base, 3, padding=1),  # 4b x 16
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 8
+            nn.Conv2d(4 * base, 64 * base, 8),  # 64b x 1
             nn.LeakyReLU()
         )
-        self.encoder_mu = nn.Conv2d(64 * base, 32 * base, 1)
-        self.encoder_logvar = nn.Conv2d(64 * base, 32 * base, 1)
+        self.encoder_mu = nn.Conv2d(64 * base, lf, 1)
+        self.encoder_logvar = nn.Conv2d(64 * base, lf, 1)
 
         self.decoder = nn.Sequential(
-            nn.Conv2d(32 * base, 64 * base, 1),
+            nn.Conv2d(lf, 64 * base, 1),
             ConvTranspose(64 * base, 4 * base, 8),
+            Conv(4 * base, 4 * base, 3, padding=1),
+            ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
             Conv(4 * base, 4 * base, 3, padding=1),
             ConvTranspose(4 * base, 4 * base, 4, stride=2, padding=1),
             Conv(4 * base, 4 * base, 3, padding=1),

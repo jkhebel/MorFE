@@ -64,18 +64,14 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
         logging.debug(f"Batch Size: {batch_size}")
         logging.debug(f"Maximum batches per epoch: {max_batches}")
         logging.debug(f"Test-train split: {split*100}%")
-        logging.debug(f"Latent features: {n_features}%")
-        logging.debug(f"VAE Layers: {n_layers}%")
-
-    writer = SummaryWriter(
-        f'{data_path}/runs/bbbc_{time.strftime("%Y%m%d-%H%M%S")}'
-    )
+        logging.debug(f"Latent features: {n_features}")
+        logging.debug(f"VAE Layers: {n_layers}")
 
     # Set up gpu/cpu device
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # Dataset
     data = HCSData.from_csv(csv_file, data_path)  # Load dataset
-    data[0][0].shape
+    logging.debug('Data loaded')
     train, test = data.split(split)  # Split data into train and test
     # data[0][0].shape
     train_loader = torch.utils.data.DataLoader(  # Generate a training loader
@@ -83,8 +79,8 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
     test_loader = torch.utils.data.DataLoader(  # Generate a testing loader
         test, batch_size=batch_size, shuffle=True)
 
-    in_shape = tuple(data[0][0].shape)
     net = VAE()
+    logging.debug(net)
 
     # Move Model to GPU
     if torch.cuda.device_count() > 1:  # If multiple gpu's
@@ -130,30 +126,50 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
                     nrow=5
                 )
 
-                writer.add_image('Input', in_grid, epoch *
-                                 max_batches + batch_n)
-                writer.add_image('Output', out_grid, epoch *
-                                 max_batches + batch_n)
+                # u_grid = torchvision.utils.make_grid(
+                #     u[0, ...].view(1024, 1,
+                #                    u.shape[-2], u.shape[-2]),
+                #     nrow=32
+                # )
+                #
+                # logvar_grid = torchvision.utils.make_grid(
+                #     logvar[0, ...].view(1024, 1,
+                #                         logvar.shape[-2], logvar.shape[-2]),
+                #     nrow=32
+                # )
+
+                if batch_n % 8 == 0:
+                    writer.add_image('Input', in_grid, epoch *
+                                     max_batches + batch_n)
+                    writer.add_image('Output', out_grid, epoch *
+                                     max_batches + batch_n)
+                    # writer.add_image('Mean', u_grid, epoch *
+                    #                  max_batches + batch_n)
+                    # writer.add_image('Logvar', logvar_grid, epoch *
+                    #                  max_batches + batch_n)
                 writer.add_scalar(
                     'loss',
                     loss,
                     epoch * max_batches + batch_n
                 )
+                writer.add_graph(net)
 
             torch.save(net.state_dict(),
                        f"{data_path}/models/{net.__class__.__name__}"
                        f"_b{batch_size}-{max_batches}_e{epochs}"
-                       f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                        )
 
             print(f"Training loss: {cum_loss:.2f}")
 
     except (KeyboardInterrupt, SystemExit):
+        print("Saving model...")
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_b{batch_size}-{max_batches}_e{epochs}"
-                   f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                   f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                    )
+        print("Model saved.")
 
 
 if __name__ == '__main__':
