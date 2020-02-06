@@ -83,7 +83,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
     test_loader = torch.utils.data.DataLoader(  # Generate a testing loader
         test, batch_size=batch_size, shuffle=True)
 
-    net = VAE(n_layers=6, lf=n_latent_features, base=n_base_features)
+    net = VAE(lf=n_latent_features, base=n_base_features)
     logging.debug(net)
 
     # Move Model to GPU

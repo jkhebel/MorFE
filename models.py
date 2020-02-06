@@ -66,12 +66,6 @@ def MOBILENETV2(pretrained=False):
     return net
 
 
-# https://becominghuman.ai/variational-autoencoders-for-new-fruits-with-keras-and-pytorch-6d0cfc4eeabd
-
-
-# https://ml-cheatsheet.readthedocs.io/en/latest/architectures.html#vae, added center crop function
-
-
 class Conv(nn.Module):
     def __init__(self, in_channels, out_channels,
                  kernel_size, stride=1, padding=0):
@@ -108,20 +102,24 @@ class VAE(nn.Module):
     def __init__(self, n_layers=6, base=16, lf=128, n_channels=5):
         super(VAE, self).__init__()
 
+        base = 32
+        lf = 512
+
         self.encoder = nn.Sequential(  # 5 x 512
-            Conv(5, base, 5, stride=2, padding=2),  # base x 256
-            Conv(base, 2 * base, 5, padding=2),  # 2*base x 256
-            Conv(2 * base, 2 * base, 5, stride=2, padding=2),  # 2b x 128
-            Conv(2 * base, 2 * base, 5, padding=2),  # 2b x 128
-            Conv(2 * base, 2 * base, 5, stride=2, padding=2),  # 2b x 64
-            Conv(2 * base, 4 * base, 5, padding=2),  # 4b x 64
-            Conv(4 * base, 4 * base, 5, stride=2, padding=2),  # 4b x 32
-            Conv(4 * base, 4 * base, 5, padding=2),  # 4b x 32
-            Conv(4 * base, 4 * base, 5, stride=2, padding=2),  # 4b x 16
+            Conv(5, base, 3, stride=2, padding=1),  # base x 256
+            Conv(base, 2 * base, 3, padding=1),  # 2*base x 256
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),  # 2b x 128
+            Conv(2 * base, 2 * base, 3, padding=1),  # 2b x 128
+            Conv(2 * base, 2 * base, 3, stride=2, padding=1),  # 2b x 64
+            Conv(2 * base, 4 * base, 3, padding=1),  # 4b x 64
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 32
+            Conv(4 * base, 4 * base, 3, padding=1),  # 4b x 32
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 16
+            Conv(4 * base, 4 * base, 3, padding=1),  # 4b x 16
+            Conv(4 * base, 4 * base, 3, stride=2, padding=1),  # 4b x 8
             nn.Conv2d(4 * base, 64 * base, 8),  # 64b x 1
             nn.LeakyReLU()
         )
-
         self.encoder_mu = nn.Conv2d(64 * base, lf, 1)
         self.encoder_logvar = nn.Conv2d(64 * base, lf, 1)
 
@@ -141,35 +139,6 @@ class VAE(nn.Module):
             nn.Conv2d(base, 5, 3, padding=1),
             nn.Tanh()
         )
-
-        # enc=[]
-        # for layer in range(n_layers):
-        #     f_in=n_channels if (layer == 0) else base * 2**layer
-        #     f_out=lf if (layer == n_layers - 1) else base * 2**(layer + 1)
-        #     kernel=512 // (2**n_layers) if (layer == n_layers - 1) else 3
-        #     enc.extend([
-        #         Conv(f_in, f_in, kernel, stride=2, padding=1),
-        #         Conv(f_in, f_out, kernel, padding=1)
-        #     ])
-        # self.encoder=nn.Sequential(*enc)
-        # del enc
-        #
-        # self.encoder_mu=nn.Conv2d(lf, lf, 1)
-        # self.encoder_logvar=nn.Conv2d(lf, lf, 1)
-        #
-        # dec=[
-        #     Conv(lf, (2**n_layers) * base, 1),
-        #     ConvT(2**n_layers * base, 2**n_layers * base, 512 // (2**n_layers))
-        # ]
-        # for layer in reversed(range(n_layers)):
-        #     f_out=n_channels if (layer == 0) else base * 2**layer
-        #     f_in=base * 2**(layer + 1)
-        #     dec.extend([
-        #         ConvT(f_in, f_in, 4, stride=2, padding=1),
-        #         Conv(f_in, f_out, 3, padding=1)
-        #     ])
-        # self.decoder=nn.Sequential(*dec)
-        # del dec
 
     def encode(self, x):
         x = self.encoder(x)
