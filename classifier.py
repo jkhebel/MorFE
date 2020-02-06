@@ -84,11 +84,10 @@ def train(network, csv_file, data_path, debug, epochs,
         logging.debug(f"Parallelized to {torch.cuda.device_count()} GPUs")
     net.to(device)  # Move model to device
 
-    writer = SummaryWriter(
-        f"{data_path}/runs/{net.__class__.__name__}"
-        f"_b{batch_size}-{max_batches}_e{epochs}"
-        f"_{time.strftime('%Y-%m-%d_%H-%M')}"
-    )
+    tr_writer = SummaryWriter(
+        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d_%H-%M')}")
+    vl_writer = SummaryWriter(
+        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d_%H-%M')}")
 
     # Define loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()
@@ -123,40 +122,40 @@ def train(network, csv_file, data_path, debug, epochs,
                     nrow=5
                 )
 
-                writer.add_image('Image_batch', grid, epoch *
-                                 max_batches + batch_n)
-                writer.add_scalar(
-                    'tr_accuracy',
+                # tr_writer.add_image('Image_batch', grid, epoch *
+                #                     max_batches + batch_n)
+                tr_writer.add_scalar(
+                    'accuracy',
                     metrics.accuracy_score(y.cpu(), predicted.cpu()),
                     epoch * max_batches + batch_n
                 )
-                writer.add_scalar(
-                    'tr_F1',
+                tr_writer.add_scalar(
+                    'F1',
                     metrics.f1_score(y.cpu(), predicted.cpu(),
                                      zero_division=0),
                     epoch * max_batches + batch_n
                 )
-                writer.add_scalar(
-                    'tr_precision',
+                tr_writer.add_scalar(
+                    'precision',
                     metrics.precision_score(
                         y.cpu(), predicted.cpu(), zero_division=0),
                     epoch * max_batches + batch_n
                 )
-                writer.add_scalar(
-                    'tr_recall',
+                tr_writer.add_scalar(
+                    'recall',
                     metrics.recall_score(
                         y.cpu(), predicted.cpu(), zero_division=0),
                     epoch * max_batches + batch_n
                 )
                 try:
-                    writer.add_scalar(
-                        'tr_auroc',
+                    tr_writer.add_scalar(
+                        'auroc',
                         metrics.roc_auc_score(y.cpu(), predicted.cpu()),
                         epoch * max_batches + batch_n
                     )
                 except:
                     logging.debug("Couldn't write auroc to board")
-                writer.add_scalar(
+                tr_writer.add_scalar(
                     'loss',
                     loss,
                     epoch * max_batches + batch_n
@@ -169,20 +168,24 @@ def train(network, csv_file, data_path, debug, epochs,
             torch.save(net.state_dict(),
                        f"{data_path}/models/{net.__class__.__name__}"
                        f"_b{batch_size}-{max_batches}_e{epochs}"
-                       f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                        )
 
             with torch.no_grad():
 
                 ts_predictions = []
                 ts_labels = []
+                val_loss = 0
                 # Iter through batches
                 msg = f"Testing epoch {epoch+1}: "
-                ttl = np.ceil((1 - split) * max_batches) or len(test_loader)
+                ttl = max_batches or len(test_loader)
                 for batch_n, (X, Y) in tqdm(enumerate(test_loader), msg, ttl):
                     # Move batch samples to gpu
                     x, y = X.to(device), Y.to(device)
                     o = net(x)  # Forward pass
+
+                    loss = criterion(o, y)
+                    val_loss += loss.item()
 
                     _, predicted = torch.max(o.data, 1)
                     ts_predictions.append(predicted)
@@ -221,34 +224,41 @@ def train(network, csv_file, data_path, debug, epochs,
                     f'AUROC of the network on the train images: {tr_auroc:0.2f}')
                 print(f'AUROC of the network on the test images: {auroc:0.2f}')
 
+                vl_writer.add_scalar(
+                    'loss',
+                    val_loss / ttl,
+                    epoch * max_batches + batch_n
+                )
                 try:
-                    writer.add_image('Image_batch', grid)
-                    writer.add_scalar(
+                    # vl_writer.add_image('Image_batch', grid)
+                    vl_writer.add_scalar(
                         'accuracy',
                         acc,
-                        epoch * ttl + batch_n
+                        epoch * max_batches + batch_n
                     )
-                    writer.add_scalar(
+                    vl_writer.add_scalar(
                         'F1',
                         F1,
-                        epoch * ttl + batch_n
+                        epoch * max_batches + batch_n
                     )
-                    writer.add_scalar(
+                    vl_writer.add_scalar(
                         'auroc',
                         auroc,
-                        epoch * ttl + batch_n
+                        epoch * max_batches + batch_n
                     )
                 except:
                     pass
 
-                scheduler.step(F1)
+                scheduler.step(auroc)
 
     except (KeyboardInterrupt, SystemExit):
+        print("Saving model...")
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_b{batch_size}-{max_batches}_e{epochs}"
-                   f"_{time.strftime('%Y-%m-%d_%H-%M')}"
+                   f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                    )
+        print("Model saved.")
 
 
 if __name__ == '__main__':

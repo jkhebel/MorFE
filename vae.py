@@ -4,7 +4,7 @@ import yaml
 from tqdm import tqdm
 import logging
 
-from sklearn import metrics
+import numpy as np
 
 import torch
 import torchvision
@@ -12,6 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from dataset import HCSData
 from models import VAE
+
+from skimage.metrics import mean_squared_error as mse
 
 
 logging.basicConfig(level=logging.INFO)
@@ -49,10 +51,11 @@ class Loss(torch.nn.Module):
 @click.option("-B", "--max_batches", type=int, default=p['max_batches'])
 @click.option("-s", "--split", type=float, default=p['split'])
 @click.option("--parallel/--no-parallel", default=p['parallel'])
-@click.option("-f", "--n_features", type=int, default=32)
+@click.option("-bf", "--n_base_features", type=int, default=32)
+@click.option("-lf", "--n_latent_features", type=int, default=32)
 @click.option("-l", "--n_layers", type=int, default=2)
 def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
-          parallel, n_features, n_layers):
+          parallel, n_base_features, n_latent_features, n_layers):
 
     # If debug, set logger level and log parameters
     if debug:
@@ -64,7 +67,8 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
         logging.debug(f"Batch Size: {batch_size}")
         logging.debug(f"Maximum batches per epoch: {max_batches}")
         logging.debug(f"Test-train split: {split*100}%")
-        logging.debug(f"Latent features: {n_features}")
+        logging.debug(f"Base features: {n_base_features}")
+        logging.debug(f"Latent features: {n_latent_features}")
         logging.debug(f"VAE Layers: {n_layers}")
 
     # Set up gpu/cpu device
@@ -79,7 +83,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
     test_loader = torch.utils.data.DataLoader(  # Generate a testing loader
         test, batch_size=batch_size, shuffle=True)
 
-    net = VAE()
+    net = VAE(n_layers=6, lf=n_latent_features, base=n_base_features)
     logging.debug(net)
 
     # Move Model to GPU
@@ -87,16 +91,16 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
         net = torch.nn.DataParallel(net)  # Parallelize
     net.to(device)  # Move model to device
 
-    writer = SummaryWriter(
-        f"{data_path}/runs/{net.__class__.__name__}"
-        f"_b{batch_size}-{max_batches}_e{epochs}"
-        f"_{time.strftime('%Y-%m-%d_%H-%M')}"
-    )
+    tr_writer = SummaryWriter(
+        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d_%H-%M')}")
+    vl_writer = SummaryWriter(
+        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d_%H-%M')}")
 
     # Define loss and optimizer
     # criterion = torch.nn.MSELoss()
     vae_loss = Loss()
     optimizer = torch.optim.Adam(net.parameters())
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 
     print("Training...")
 
@@ -107,10 +111,15 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
             msg = f"Training epoch {epoch+1}: "
             ttl = max_batches or len(train_loader)  # Iter through batches
             for batch_n, (X, _) in tqdm(enumerate(train_loader), msg, ttl):
+
+                if batch_n > max_batches:
+                    break
+
                 x = X.to(device)  # Move batch samples to gpu
 
                 o, u, logvar = net(x)  # Forward pass
                 optimizer.zero_grad()  # Reset gradients
+
                 loss = vae_loss(o, x, u, logvar)  # Compute Loss
                 loss.backward()  # Propagate loss, compute gradients
                 optimizer.step()  # Update weights
@@ -126,47 +135,73 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
                     nrow=5
                 )
 
-                # u_grid = torchvision.utils.make_grid(
-                #     u[0, ...].view(1024, 1,
-                #                    u.shape[-2], u.shape[-2]),
-                #     nrow=32
-                # )
-                #
-                # logvar_grid = torchvision.utils.make_grid(
-                #     logvar[0, ...].view(1024, 1,
-                #                         logvar.shape[-2], logvar.shape[-2]),
-                #     nrow=32
-                # )
-
                 if batch_n % 8 == 0:
-                    writer.add_image('Input', in_grid, epoch *
-                                     max_batches + batch_n)
-                    writer.add_image('Output', out_grid, epoch *
-                                     max_batches + batch_n)
+                    tr_writer.add_image('Input', in_grid, epoch *
+                                        max_batches + batch_n)
+                    tr_writer.add_image('Output', out_grid, epoch *
+                                        max_batches + batch_n)
                     # writer.add_image('Mean', u_grid, epoch *
                     #                  max_batches + batch_n)
                     # writer.add_image('Logvar', logvar_grid, epoch *
                     #                  max_batches + batch_n)
-                writer.add_scalar(
+
+                tr_writer.add_scalar(
                     'loss',
                     loss,
                     epoch * max_batches + batch_n
                 )
-                writer.add_graph(net)
+                tr_writer.add_scalar(
+                    'mse',
+                    mse(x.cpu().detach().numpy(), o.cpu().detach().numpy()),
+                    epoch * max_batches + batch_n
+                )
+
+            with torch.no_grad():
+
+                val_loss = 0
+                val_mse = []
+                # Iter through batches
+                msg = f"Testing epoch {epoch+1}: "
+                ttl = max_batches or len(test_loader)
+                for batch_n, (X, _) in tqdm(enumerate(test_loader), msg, ttl):
+
+                    if batch_n > max_batches:
+                        break
+
+                    # Move batch samples to gpu
+                    x = X.to(device)
+                    o, u, logvar = net(x)  # Forward pass
+
+                    loss = vae_loss(o, x, u, logvar)
+                    val_loss += loss.item()
+
+                    val_mse.append(mse(x.cpu().detach().numpy(),
+                                       o.cpu().detach().numpy()))
+
+                vl_writer.add_scalar(
+                    'loss',
+                    val_loss,
+                    epoch * max_batches + batch_n
+                )
+                vl_writer.add_scalar(
+                    'mse',
+                    np.mean(val_mse),
+                    epoch * max_batches + batch_n
+                )
+
+            scheduler.step(-cum_loss)
 
             torch.save(net.state_dict(),
                        f"{data_path}/models/{net.__class__.__name__}"
-                       f"_b{batch_size}-{max_batches}_e{epochs}"
+                       f"_base-{n_base_features}_latent-{n_latent_features}"
                        f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                        )
-
-            print(f"Training loss: {cum_loss:.2f}")
 
     except (KeyboardInterrupt, SystemExit):
         print("Saving model...")
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
-                   f"_b{batch_size}-{max_batches}_e{epochs}"
+                   f"_base-{n_base_features}_latent-{n_latent_features}"
                    f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
                    )
         print("Model saved.")
