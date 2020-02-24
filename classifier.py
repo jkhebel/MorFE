@@ -6,6 +6,7 @@ import logging
 
 import numpy as np
 from sklearn import metrics
+import PIL
 
 import torch
 import torchvision
@@ -25,6 +26,7 @@ with open("./configs/params.yml", 'r') as f:
 
 
 @click.command()
+@click.option("--name", type=str, default="")
 @click.option("-n", "--network", type=str, default=p['network'])
 @click.option("--csv_file", type=click.Path(exists=True), default=p['csv_file'])
 @click.option("--data_path", type=click.Path(exists=True), default=p['data_path'])
@@ -34,7 +36,7 @@ with open("./configs/params.yml", 'r') as f:
 @click.option("-B", "--max_batches", type=int, default=p['max_batches'])
 @click.option("-s", "--split", type=float, default=p['split'])
 @click.option("--parallel/--no-parallel", default=p['parallel'])
-def train(network, csv_file, data_path, debug, epochs,
+def train(name, network, csv_file, data_path, debug, epochs,
           batch_size, max_batches, split, parallel):
 
     # If debug, set logger level and log parameters
@@ -55,9 +57,25 @@ def train(network, csv_file, data_path, debug, epochs,
     except AssertionError as e:
         logging.debug(e)
 
+    train_TF = torchvision.transforms.Compose([
+        torchvision.transforms.ToPILImage(),
+        torchvision.transforms.RandomHorizontalFlip(),
+        torchvision.transforms.RandomVerticalFlip(),
+        torchvision.transforms.RandomCrop(256),
+        torchvision.transforms.ToTensor()
+    ])
+
+    test_TF = torchvision.transforms.Compose([
+        torchvision.transforms.ToPILImage(),
+        torchvision.transforms.RandomCrop((256, 256)),
+        torchvision.transforms.ToTensor()
+    ])
+
     # Dataset
     data = HCSData.from_csv(csv_file, data_path)  # Load dataset
     train, test = data.split(0.8)  # Split data into train and test
+    # train.transforms = train_TF
+    # test.transforms = test_TF
     logging.debug(f"Data loaded and split")
 
     # Sampler (random weighted)
@@ -85,9 +103,9 @@ def train(network, csv_file, data_path, debug, epochs,
     net.to(device)  # Move model to device
 
     tr_writer = SummaryWriter(
-        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d_%H-%M')}")
+        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d')}_{name}")
     vl_writer = SummaryWriter(
-        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d_%H-%M')}")
+        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d')}_{name}")
 
     # Define loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()
@@ -117,11 +135,11 @@ def train(network, csv_file, data_path, debug, epochs,
                 tr_predictions.append(predicted)
                 tr_labels.append(y)
 
-                grid = torchvision.utils.make_grid(
-                    x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
-                    nrow=5
-                )
-
+                # grid = torchvision.utils.make_grid(
+                #     x.view(3 * batch_size, 1, x.shape[-2], x.shape[-1]),
+                #     nrow=3
+                # )
+                #
                 # tr_writer.add_image('Image_batch', grid, epoch *
                 #                     max_batches + batch_n)
                 tr_writer.add_scalar(
@@ -168,7 +186,7 @@ def train(network, csv_file, data_path, debug, epochs,
             torch.save(net.state_dict(),
                        f"{data_path}/models/{net.__class__.__name__}"
                        f"_b{batch_size}-{max_batches}_e{epochs}"
-                       f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}_{name}.pt"
                        )
 
             with torch.no_grad():
@@ -256,7 +274,7 @@ def train(network, csv_file, data_path, debug, epochs,
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_b{batch_size}-{max_batches}_e{epochs}"
-                   f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
+                   f"_{time.strftime('%Y-%m-%d_%H-%M')}_{name}.pt"
                    )
         print("Model saved.")
 

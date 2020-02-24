@@ -1,126 +1,83 @@
-# Insight_Project_Framework
-Framework for machine learning projects at Insight Data Science.
+# MorFE
 
-## Motivation for this project format:
-- **Insight_Project_Framework** : Put all source code for production within structured directory
-- **tests** : Put all source code for testing in an easy to find location
-- **configs** : Enable modification of all preset variables within single directory (consisting of one or many config files for separate tasks)
-- **data** : Include example a small amount of data in the Github repository so tests can be run to validate installation
-- **build** : Include scripts that automate building of a standalone environment
-- **static** : Any images or content to include in the README or web framework if part of the pipeline
+MorFE is a deep learning tool for analysis of cellular features for drug discovery.
 
-## Setup
-Clone repository and update python path
-```
-repo_name=Insight_Project_Framework # URL of your new repository
-username=mrubash1 # Username for your personal github account
-git clone https://github.com/$username/$repo_name
-cd $repo_name
-echo "export $repo_name=${PWD}" >> ~/.bash_profile
-echo "export PYTHONPATH=$repo_name/src:${PYTHONPATH}" >> ~/.bash_profile
-source ~/.bash_profile
-```
-Create new development branch and switch onto it
-```
-branch_name=dev-readme_requisites-20180905 # Name of development branch, of the form 'dev-feature_name-date_of_creation'}}
-git checkout -b $branch_name
-```
+The project presentation slides with an explanation and results can be found [here](https://bit.ly/MorFE-slides).
 
-## Initial Commit
-Lets start with a blank slate: remove `.git` and re initialize the repo
-```
-cd $repo_name
-rm -rf .git   
-git init   
-git status
-```  
-You'll see a list of file, these are files that git doesn't recognize. At this point, feel free to change the directory names to match your project. i.e. change the parent directory Insight_Project_Framework and the project directory Insight_Project_Framework:
-Now commit these:
-```
-git add .
-git commit -m "Initial commit"
-git push origin $branch_name
-```
+## 1. Repository Structure
 
-## Requisites
+    MorFE
+    ├── build
+    │   └── Environment and data management scripts
+    ├── configs
+    │   └── Config files for command-line tool
+    ├── data
+    │   └── Metadata (.csv) file
+    │   └── Image collections
+    │       └── Image channels (.tiff)
+    │            ...
+    │        ....
+    ├── train
+        └── Code for retraining the model
 
-- List all packages and software needed to build the environment
-- This could include cloud command line tools (i.e. gsutil), package managers (i.e. conda), etc.
+## 2. Installation
 
-#### Dependencies
+#### 2.1 MorFE Repository
 
-- [Streamlit](streamlit.io)
+Checkout the repo using git:
 
-#### Installation
-To install the package above, pleae run:
-```shell
-pip install -r requiremnts
-```
+    git clone https://github.com/jkhebel/MorFE
+    cd MorFE
 
-## Build Environment
-- Include instructions of how to launch scripts in the build subfolder
-- Build scripts can include shell scripts or python setup.py files
-- The purpose of these scripts is to build a standalone environment, for running the code in this repository
-- The environment can be for local use, or for use in a cloud environment
-- If using for a cloud environment, commands could include CLI tools from a cloud provider (i.e. gsutil from Google Cloud Platform)
-```
-# Example
+#### 2.2 Python Environment
 
-# Step 1
-# Step 2
-```
+Create a virtual python environment with the libraries listed in the `build/requirements.txt` file. The original module was built using `python=3.7.5`.
 
-## Configs
-- We recommond using either .yaml or .txt for your config files, not .json
-- **DO NOT STORE CREDENTIALS IN THE CONFIG DIRECTORY!!**
-- If credentials are needed, use environment variables or HashiCorp's [Vault](https://www.vaultproject.io/)
+The python environment can be built using `pyenv-virtualenv`:
 
+    pyenv install 3.7.5
+    pyenv virtualenv 3.7.5 MorFE
+    pyenv activate MorFE
+    pip install -r build/requirements.txt
 
-## Test
-- Include instructions for how to run all tests after the software is installed
-```
-# Example
+Or alternatively, using `conda`:
 
-# Step 1
-# Step 2
-```
+    conda create -n MorFE python=3.7.5
+    conda activate MorFE
+    pip install -r build/requirements.txt
 
-## Run Inference
-- Include instructions on how to run inference
-- i.e. image classification on a single image for a CNN deep learning project
-```
-# Example
+If using conda, make sure you use the correct `pip` installed within your `conda` virtual environment. If Anaconda3 is installed in the home directory, the correct pip can also be run with `~/anaconda3/envs/insight/bin/pip`.
 
-# Step 1
-# Step 2
-```
+#### 2.3 Dataset
 
-## Build Model
-- Include instructions of how to build the model
-- This can be done either locally or on the cloud
-```
-# Example
+MorFE was trained and validated using the [Broad Biomage Benchmark Collection #22 Dataset](https://data.broadinstitute.org/bbbc/BBBC022/). The dataset is comprised of a [metadata file](https://data.broadinstitute.org/bbbc/BBBC022/BBBC022_v1_image.csv) and an archive of [image files](https://data.broadinstitute.org/bbbc/BBBC022/BBBC022_v1_images_urls.txt).
 
-# Step 1
-# Step 2
-```
+> Describe the Dataset
 
-## Serve Model
-- Include instructions of how to set up a REST or RPC endpoint
-- This is for running remote inference via a custom model
-```
-# Example
+##### 2.3.1 Download
 
-# Step 1
-# Step 2
-```
+The dataset can be downloaded for local use by running the following script. The script should:
 
-## Analysis
-- Include some form of EDA (exploratory data analysis)
-- And/or include benchmarking of the model and results
-```
-# Example
+-   Download the compressed zip files
+-   Extract the zipped images
+-   Download the metadata file
 
-# Step 1
-# Step 2
-```
+As the dataset is quite large (~1.5 TB) this will take a significant amount of time.
+
+    bash build/download_bbbc022.sh
+
+##### 2.3.2 Clean the metadata
+
+Unfortunately, some of the zipped files are corrupted or missing. This leaves the metadata file full up entries that point to dead paths. In order to prune invalid samples from the dataset and clean the metadata headers, run the following command:
+
+    python build/clean_metadata.py
+
+## 3. Web App
+
+    streamlit webapp.py
+
+## 4. Command Line Tool
+
+### 4.1 Inference
+
+### 4.2 Training

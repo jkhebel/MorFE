@@ -5,13 +5,17 @@ from tqdm import tqdm
 import logging
 
 import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
 
+from matplotlib import pyplot as plt
+
 from dataset import HCSData
-from models import VAE
+from models import VAE, VAE_fm
 
 from skimage.metrics import mean_squared_error as mse
 
@@ -23,39 +27,34 @@ with open("./configs/params.yml", 'r') as f:
     p = yaml.load(f, Loader=yaml.FullLoader)
 
 
-def vae_loss(output, input, mean, logvar, loss_func):
-    recon_loss = loss_func(output, input)
-    kl_loss = torch.mean(0.5 * torch.sum(
-        torch.exp(logvar) + mean**2 - 1. - logvar, 1))
-    return recon_loss + kl_loss
-
-
 # https://becominghuman.ai/variational-autoencoders-for-new-fruits-with-keras-and-pytorch-6d0cfc4eeabd
 class Loss(torch.nn.Module):
     def __init__(self):
         super(Loss, self).__init__()
         self.mse_loss = torch.nn.MSELoss(reduction="sum")
 
-    def forward(self, recon_x, x, mu, logvar):
+    def forward(self, recon_x, x, mu, logvar, beta=1):
         MSE = self.mse_loss(recon_x, x)
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        return MSE + KLD
+        return MSE + beta * KLD
 
 
 @click.command()
+@click.option("--name", type=str, default="")
 @click.option("--csv_file", type=click.Path(exists=True), default=p['csv_file'])
 @click.option("--data_path", type=click.Path(exists=True), default=p['data_path'])
 @click.option("--debug/--no-debug", default=p['debug'])
 @click.option("-e", "--epochs", type=int, default=p['epochs'])
 @click.option("-b", "--batch_size", type=int, default=p['batch_size'])
-@click.option("-B", "--max_batches", type=int, default=p['max_batches'])
+@click.option("-M", "--max_batches", type=int, default=p['max_batches'])
 @click.option("-s", "--split", type=float, default=p['split'])
 @click.option("--parallel/--no-parallel", default=p['parallel'])
 @click.option("-bf", "--n_base_features", type=int, default=32)
 @click.option("-lf", "--n_latent_features", type=int, default=32)
 @click.option("-l", "--n_layers", type=int, default=2)
-def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
-          parallel, n_base_features, n_latent_features, n_layers):
+@click.option("-B", "--beta", type=int, default=2)
+def train(name, csv_file, data_path, debug, epochs, batch_size, max_batches,
+          split, parallel, n_base_features, n_latent_features, n_layers, beta):
 
     # If debug, set logger level and log parameters
     if debug:
@@ -83,7 +82,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
     test_loader = torch.utils.data.DataLoader(  # Generate a testing loader
         test, batch_size=batch_size, shuffle=True)
 
-    net = VAE(lf=n_latent_features, base=n_base_features)
+    net = VAE_fm(lf=n_latent_features, base=n_base_features)
     logging.debug(net)
 
     # Move Model to GPU
@@ -92,14 +91,14 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
     net.to(device)  # Move model to device
 
     tr_writer = SummaryWriter(
-        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d_%H-%M')}")
+        f"{data_path}/runs/training_{time.strftime('%Y-%m-%d')}_{name}")
     vl_writer = SummaryWriter(
-        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d_%H-%M')}")
+        f"{data_path}/runs/validation_{time.strftime('%Y-%m-%d')}_{name}")
 
     # Define loss and optimizer
     # criterion = torch.nn.MSELoss()
     vae_loss = Loss()
-    optimizer = torch.optim.Adam(net.parameters())
+    optimizer = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 
     print("Training...")
@@ -114,28 +113,27 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
 
                 if batch_n > max_batches:
                     break
-
                 x = X.to(device)  # Move batch samples to gpu
 
                 o, u, logvar = net(x)  # Forward pass
                 optimizer.zero_grad()  # Reset gradients
 
-                loss = vae_loss(o, x, u, logvar)  # Compute Loss
+                loss = vae_loss(o, x, u, logvar, beta)  # Compute Loss
                 loss.backward()  # Propagate loss, compute gradients
                 optimizer.step()  # Update weights
 
                 cum_loss += loss.item()
 
                 in_grid = torchvision.utils.make_grid(
-                    x.view(5 * batch_size, 1, x.shape[-2], x.shape[-1]),
-                    nrow=5
+                    x.view(3 * batch_size, 1, x.shape[-2], x.shape[-1]),
+                    nrow=3
                 )
                 out_grid = torchvision.utils.make_grid(
-                    o.view(5 * batch_size, 1, o.shape[-2], o.shape[-1]),
-                    nrow=5
+                    o.view(3 * batch_size, 1, o.shape[-2], o.shape[-1]),
+                    nrow=3
                 )
 
-                if batch_n % 8 == 0:
+                if True:
                     tr_writer.add_image('Input', in_grid, epoch *
                                         max_batches + batch_n)
                     tr_writer.add_image('Output', out_grid, epoch *
@@ -165,7 +163,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
                 ttl = max_batches or len(test_loader)
                 for batch_n, (X, _) in tqdm(enumerate(test_loader), msg, ttl):
 
-                    if batch_n > max_batches:
+                    if batch_n > 16:
                         break
 
                     # Move batch samples to gpu
@@ -194,7 +192,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
             torch.save(net.state_dict(),
                        f"{data_path}/models/{net.__class__.__name__}"
                        f"_base-{n_base_features}_latent-{n_latent_features}"
-                       f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
+                       f"_{time.strftime('%Y-%m-%d_%H-%M')}_{name}.pt"
                        )
 
     except (KeyboardInterrupt, SystemExit):
@@ -202,7 +200,7 @@ def train(csv_file, data_path, debug, epochs, batch_size, max_batches, split,
         torch.save(net.state_dict(),
                    f"{data_path}/models/{net.__class__.__name__}"
                    f"_base-{n_base_features}_latent-{n_latent_features}"
-                   f"_{time.strftime('%Y-%m-%d_%H-%M')}.pt"
+                   f"_{time.strftime('%Y-%m-%d_%H-%M')}_{name}.pt"
                    )
         print("Model saved.")
 

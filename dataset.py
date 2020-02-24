@@ -5,6 +5,10 @@ import logging
 import torch
 from pathlib import Path
 
+import PIL
+
+import transforms as T
+
 import matplotlib
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
@@ -18,7 +22,7 @@ class HCSData(torch.utils.data.Dataset):
     High Content Screening Dataset (BBBC022)
     """
 
-    def __init__(self, data, data_path="./data/raw/"):
+    def __init__(self, data, data_path="./data/raw/", transforms=None):
         """
         Args:
             data (DataFrame) : pandas dataframe of metadata
@@ -43,6 +47,7 @@ class HCSData(torch.utils.data.Dataset):
             'TIME'
         ]
         self.root = Path(data_path)
+        self.transforms = transforms
 
     @classmethod
     def from_csv(cls, csv_file, data_path):
@@ -74,8 +79,11 @@ class HCSData(torch.utils.data.Dataset):
         """
         sample = self.df.iloc[idx]  # Grab sample at index idx
 
-        x = torch.from_numpy(self.__load_img__(sample)).type(
-            torch.float)  # Load images
+        x = self.__load_img__(sample)
+        x = torch.from_numpy(x).type(torch.float)  # Load images
+        if self.transforms is not None:
+            x = self.transforms(x)
+
         y = sample['ROLE']  # Load label
 
         # Encode y labels to binary
@@ -102,7 +110,7 @@ class HCSData(torch.utils.data.Dataset):
     def __load_img__(self, sample):
         """
         Load each image channel for the given sample and stack them into a
-        single 5-channel 2D image
+        single 3-channel 2D image
         """
         plate = sample['PLATE']  # Get plate num.
 
@@ -116,14 +124,8 @@ class HCSData(torch.utils.data.Dataset):
         syto_path = self.root / \
             f"BBBC022_v1_images_{plate}w3/{sample['FileSyto']}"
         syto = plt.imread(syto_path)
-        ph_path = self.root / \
-            f"BBBC022_v1_images_{plate}w4/{sample['FilePh']}"
-        ph = plt.imread(ph_path)
-        mito_path = self.root / \
-            f"BBBC022_v1_images_{plate}w5/{sample['FileMito']}"
-        mito = plt.imread(mito_path)
 
-        channels = [hoechst, er, syto, ph, mito]
+        channels = [hoechst, er, syto]
 
         # crop and normalize each channel individually
         for i, c in enumerate(channels):
@@ -131,9 +133,9 @@ class HCSData(torch.utils.data.Dataset):
             channels[i] = (c - c.mean()) / c.std()
 
         # Stack images in channel (x, y, c) dimension
-        img = np.stack(channels)
+        img = np.stack(channels).astype(np.float64())
 
-        return img.astype(np.float64())
+        return img
 
     def split(self, ratio):
         """
