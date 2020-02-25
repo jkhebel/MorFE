@@ -4,3 +4,4 @@ runs/
 _posts/
 .python-version
 __pycache__
+.sublime-project
