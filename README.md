@@ -58,13 +58,13 @@ MorFE was trained and validated using the [Broad Biomage Benchmark Collection #2
 
 The dataset can be downloaded for local use by running the following script. The script should:
 
+-   Download the metadata file
 -   Download the compressed zip files
 -   Extract the zipped images
--   Download the metadata file
 
-As the dataset is quite large (~1.5 TB) this will take a significant amount of time.
+As the dataset is quite large (~1.5 TB) this will take a significant amount of time. In addition, the data must be stored on a large enough hard drive. If working on an EC2 instance, it is recommend to *mount an external volume* for local data storage. The directory or mount point where the dataset will be stored should be passed to the bash script:
 
-    bash build/download_bbbc022.sh
+    bash build/download_dataset.sh /path/to/data/drive
 
 ##### 2.3.2 Clean the metadata
 
