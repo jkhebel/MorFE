@@ -12,7 +12,7 @@ IMG_DIR="${DATA_DIR}/images"
 # Download metadata
 wget https://data.broadinstitute.org/bbbc/BBBC022/BBBC022_v1_image.csv -P $DATA_DIR
 # Download image archives
-wget -i build/BBBC024_v1_images_urls.txt -P $IMG_DIR
+wget -i build/BBBC022_v1_images_urls.txt -P $IMG_DIR
 
 # Unzip image archives
 unzip "${IMG_DIR}/*.zip" -d $IMG_DIR
