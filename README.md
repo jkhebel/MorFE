@@ -113,8 +113,8 @@ or to train a new model for feature extraction. Run the python file with the
 
 Before declaring which `function` you'd like to run, you can first load a
 configuration file. Configuration files are useful for preserving parameters
-across multiple runs or seperate functions (e.g. first training a model, then
-extracting features with the same model). Keep in mind that parameters defined
+across multiple runs or seperate functions \(e.g. first training a model, then
+extracting features with the same model\). Keep in mind that parameters defined
 in the config file are later overwritten by any command-line arguents passed.
 
 You can see the default arguments by examining the `configs/default.yml` file,
@@ -127,11 +127,12 @@ By defaulte, MorFE loads the dataset defined by the metadata file stored at
 load a different dataset, the filepath can be passed using the `--dataset`
 argument.
 
-    python MorFE.py --dataset /path/to/dataset.csv  function-name
+    python MorFE.py --dataset /path/to/dataset.csv function-name
 
 Currently the following functions are implement:
 
   > `extract-features` - use a pre-trained model to extract image features and predict cell organization
+
   > `train` - train a new model for feature extraction using a provided dataset
 
 ### 4.1 Feature Extraction (Inference)
@@ -146,7 +147,7 @@ from input samples, and extract the corresponding feature maps.
 If you would like to train your own model, this can be achieved using the `train`
 function.
 
-    python MorFe.py train  --dataset /path/to/dataset.csv
+    python MorFe.py --dataset /path/to/dataset.csv train
 
 ## 5. Future Development
 
