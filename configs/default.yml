@@ -1,0 +1,9 @@
+# Model parameters -------------------------
+network: 'vgg16'
+epochs: 300
+batch_size: 16
+max_batches: 0
+label_classes: 2
+debug: False
+parallel: True
+split: 0.8
