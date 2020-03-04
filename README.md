@@ -129,7 +129,7 @@ argument.
 
 Currently the following functions are implement:
 
-- `extract-features` - use a pre-trained model to extract image features and predict cell organization
+- `extract-features` - use a pre-trained model to extract image features and predict cell organizationt
 - `train` - train a new model for feature extraction using a provided dataset
 
 ### 4.1 Feature Extraction (Inference)
@@ -137,14 +137,14 @@ Currently the following functions are implement:
 You can use the `extract-features` function to predict cell organization maps
 from input samples, and extract the corresponding feature maps.
 
-    python MorFe.py --dataset /path/to/dataset.csv extract-features
+    python MorFE.py --dataset /path/to/dataset.csv extract-features
 
 ### 4.2 Training
 
 If you would like to train your own model, this can be achieved using the `train`
 function.
 
-    python MorFe.py --dataset /path/to/dataset.csv train
+    python MorFE.py --dataset /path/to/dataset.csv train
 
 ## 5. Future Development
 

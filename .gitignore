@@ -2,8 +2,6 @@
 data/
 new_data/
 ./new_data/
-runs/
-_posts/
 .python-version
 __pycache__
 *.sublime-project
