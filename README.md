@@ -1,7 +1,5 @@
 # MorFE
 
-> Visualization here
-
 MorFE is a deep learning tool for analysis of cellular features for drug
 discovery.
 
@@ -131,9 +129,8 @@ argument.
 
 Currently the following functions are implement:
 
-  > `extract-features` - use a pre-trained model to extract image features and predict cell organization
-
-  > `train` - train a new model for feature extraction using a provided dataset
+- `extract-features` - use a pre-trained model to extract image features and predict cell organization.  
+- `train` - train a new model for feature extraction using a provided dataset
 
 ### 4.1 Feature Extraction (Inference)
 
