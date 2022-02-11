@@ -89,7 +89,7 @@ pluggy==0.13.1
 prometheus-client==0.7.1
 prometheus-flask-exporter==0.12.1
 prompt-toolkit==3.0.2
-protobuf==3.11.2
+protobuf==3.15.0
 ptyprocess==0.6.0
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
